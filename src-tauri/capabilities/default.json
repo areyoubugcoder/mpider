@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认能力集：主窗口与种子框选层（seed-pick）启用核心默认权限。自定义 #[command] 不受 ACL 限制，可直接 invoke。",
+  "windows": ["main", "seed-pick"],
+  "permissions": ["core:default"]
+}

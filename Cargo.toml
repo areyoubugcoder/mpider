@@ -1,0 +1,14 @@
+# MPider 工作区：核心库 + 纯解析库 + Tauri 壳
+[workspace]
+resolver = "2"
+members = ["crates/article-md", "crates/core", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+repository = "https://github.com/areyoubugcoder/mpider"
+
+[profile.release]
+strip = true          # 去符号，减小体积 + 提高逆向门槛
+lto = "thin"

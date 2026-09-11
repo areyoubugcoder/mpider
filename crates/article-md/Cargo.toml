@@ -1,0 +1,22 @@
+[package]
+name = "article-md"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# 微信公众号文章 HTML → Markdown 的独立解析库（不含网络抓取）。
+# 移植自 Python 参考实现 wechat-article-parser（0.0.6）：六种版式的元数据 + 正文提取。
+# 只做纯解析：输入 (url, html)，输出结构化 ArticleResult —— 抓取/并发/入库都在调用方。
+
+[lib]
+name = "article_md"
+path = "src/lib.rs"
+
+[dependencies]
+# DOM 查询（版式探测 / meta / script 收集）——与 mpider-core 同版本线
+scraper = "0.24.0"
+# 内嵌 JS 变量与内容块的抽取
+regex = "1.11.3"
+# HTML → Markdown 转换（html5ever 系，处理残缺 HTML 稳健）
+htmd = "0.2"

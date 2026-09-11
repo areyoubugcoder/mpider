@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MPider",
+  "version": "0.1.0",
+  "identifier": "io.github.areyoubugcoder.mpider",
+  "build": {
+    "frontendDist": "../frontend/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MPider 控制台",
+        "width": 1040,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 520,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "微信公众号采集控制台",
+    "icon": [
+      "icons-v2/32x32.png",
+      "icons-v2/128x128.png",
+      "icons-v2/128x128@2x.png",
+      "icons-v2/icon.icns",
+      "icons-v2/icon.ico"
+    ]
+  }
+}

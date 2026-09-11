@@ -1,0 +1,109 @@
+[package]
+name = "mpider-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mpider_core"
+path = "src/lib.rs"
+
+[dependencies]
+# 存储：rusqlite(bundled) 起步 —— 编译快、无 DATABASE_URL 摩擦、语义贴近 Python 的 sqlite3。
+# 后续若需要异步/连接池可平滑换成 sqlx（表结构与 SQL 语义保持一致即可）。
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+
+# 序列化
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+
+# HTML 解析（对齐 Python selectolax：#activity-name / og:title / #js_content）
+scraper = "0.24.0"
+
+# MITM 代理：hudsucker（hyper 1 + rustls + tokio），默认特性含 rcgen-ca / rustls-client。
+# rcgen-ca 提供内置的 RcgenAuthority（运行期用 rcgen 生成根 CA + 动态签叶证书）。
+# 注意：rustls / rustls 的 pki_types / crypto provider 统一走 hudsucker 再导出
+# （`hudsucker::rustls`），避免与 hudsucker 内部依赖的 rustls(0.23)/tokio-rustls(0.26) 版本错配，
+# 因此本 crate 不单独直依赖 rustls。
+hudsucker = "0.25.0"
+# 注：构造 CA 用的 rcgen 走 `hudsucker::rcgen` 再导出（见 ca.rs），不在此直接依赖，
+# 以免版本与 hudsucker 内部使用的那份错配。
+
+# 异步运行时
+tokio = { version = "1.48.0", features = ["full"] }
+# 读取/重建 HTTP body（MITM 里缓冲表单 body、注入接力脚本）——与 hudsucker 同版本线
+http-body-util = "0.1.5"
+
+# 回放/上游/集成测试用的 HTTP 客户端（rustls-tls，避免 openssl 依赖）
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
+
+# 查询串解析 / URL 编码（对齐 Python parse_qsl(keep_blank_values) 与 quote(safe="")）
+form_urlencoded = "1.2.2"
+percent-encoding = "2.3.2"
+url = "2.5.8"
+
+# 正则：解析文章 HTML 内嵌 JS 变量（对齐 proxy_addon.parse_article_meta_from_html）
+regex = "1.11.3"
+
+# 文章正文 HTML → Markdown（独立解析库，移植自 Python wechat-article-parser）
+article-md = { path = "../article-md" }
+
+# RPA：剪贴板（mac/win 把种子链接放剪贴板，配合 osascript/人工粘贴送进微信）
+# 只需文本剪贴板，关掉 image-data 默认特性以免拉进 image/objc2 等一大坨依赖。
+arboard = { version = "3.6.1", default-features = false }
+
+# 飞书通知：Webhook 签名 HmacSHA256 + Base64（notify.rs）
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+# 错误处理与日志
+# 说明：本阶段库内统一用 anyhow::Result（feasibility 迭代快）；后续对外 API 稳定后可按需
+# 引入 thiserror 定义结构化错误类型。TLS 直通不需要 tls-parser —— hudsucker 0.25 原生的
+# should_intercept_tls(ClientHello) 已直接暴露 SNI 决策点（见 capture.rs），无需自解析 ClientHello。
+anyhow = "1.0.100"
+tracing = "0.1.41"
+# 环节日志的本地时间格式化（applog::format_local：导出文件 / CLI 打印）；只开 clock，不拉 serde/wasm
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Windows 原生 UI Automation：驱动微信内置浏览器打开种子链接（rpa.rs 的 open_seed）。
+# 仅 Windows 目标拉入；mac/linux 不编译。版本对齐生态已在用的 windows 0.61.x，避免重复版本。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    # 线程 DPI 感知：rpa.rs 保证窗口矩形、框选坐标与点击同处物理像素空间
+    "Win32_UI_HiDpi",
+    # 系统代理：InternetSetOption 广播「代理设置已变更/刷新」（sysproxy.rs 的 WinInetApplier）
+    "Win32_Networking_WinInet",
+] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+# 集成测试里起一个本地 TLS origin（证明按 SNI 直通时的裸 TCP 隧道确实透传原始证书）
+tokio-rustls = "0.26.4"
+
+[[example]]
+name = "mitm_smoke"
+path = "examples/mitm_smoke.rs"
+
+
+
+
+[[example]]
+name = "detail_probe"
+path = "examples/detail_probe.rs"
+
+# Windows 纯 Rust RPA 冒烟（自检 / 命令行标定点位 / 测试点击 / 按标定点位拉起浏览器→关闭）
+[[example]]
+name = "rpa_smoke"
+path = "examples/rpa_smoke.rs"
+
+[[example]]
+name = "manualcap_probe"
+path = "examples/manualcap_probe.rs"

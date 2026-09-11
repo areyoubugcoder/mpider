@@ -1,0 +1,21 @@
+data/
+
+# Python：本地虚拟环境（上游参考包）与 tools/ 脚本的缓存
+.venv/
+__pycache__/
+*.pyc
+
+# --- Rust / Tauri ---
+/target/
+**/target/
+node_modules/
+frontend/dist/
+src-tauri/gen/
+.DS_Store
+
+# 本地日志 / 抓包追踪
+*.log
+trace/
+
+# Claude Code 本地工作区（worktree 检出、会话产物）
+.claude/

@@ -1,0 +1,38 @@
+[package]
+name = "mpider-tauri"
+description = "mpider 桌面外壳（Tauri v2）：#[command] 薄封装 mpider-core + 事件推送"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "mpider-tauri"
+
+# lib + bin：遵循 Tauri v2 推荐布局（run() 放 lib，便于将来接 mobile）。
+[lib]
+name = "mpider_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri v2 —— tray-icon 特性用于 §9 系统托盘骨架。
+tauri = { version = "2", features = ["tray-icon"] }
+# 命令层里等主循环释放整链锁的短暂 sleep（与 tauri 同一 tokio 运行时）
+tokio = { version = "1", features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 核心库：作为 path 依赖一起编（feasibility 的关键验证点）。
+mpider-core = { path = "../crates/core" }
+
+# Windows：ShellExecuteW 以默认协议处理器打开 URL（open_external），
+# 避免 cmd `start` 把 URL 里的 `&` 当命令分隔符、也避免 explorer 把带查询串的 URL 当成打开资源管理器。
+# 版本对齐 mpider-core 已用的 windows 0.61，避免多版本。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+

@@ -1,0 +1,86 @@
+name: Release
+
+# 打 v* 标签时构建三份安装包（macOS Apple Silicon / macOS Intel / Windows x64）并发到 GitHub Release；
+# 手动触发（workflow_dispatch）只构建、不发布，产物以 Actions artifact 形式留存，用来验证打包链路。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS (Apple Silicon)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            label: macOS (Intel)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows (x64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+          workspaces: . -> target
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建安装包
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }}
+          # 只有 tag 触发才建 Release；手动触发时 tagName 为空，tauri-action 只构建不发布。
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && format('MPider {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+          releaseBody: |
+            安装包**没有代码签名**，系统会拦一下，属正常现象：
+
+            - macOS：首次打开如提示「已损坏 / 无法验证开发者」，在终端执行
+              `xattr -dr com.apple.quarantine /Applications/MPider.app` 后再打开。
+              Apple Silicon 选 `aarch64`，Intel 选 `x64`。
+            - Windows：SmartScreen 提示时点「更多信息」→「仍要运行」。
+
+            本工具需要安装根证书、切换系统代理才能工作，详见 README 与「常见问题」。
+
+      - name: 留存产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpider-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe

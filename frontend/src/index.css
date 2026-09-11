@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   主题 token（HSL 三元组，供 tailwind.config.cjs 里 hsl(var(--x)) 消费）。
+
+   设计基线：沉静 · 工具感（见 docs/ui-baseline.md）
+   - 线条保持 shadcn 原有的细淡风格：1px 淡边、shadow-sm 柔和阴影，不做粗边 / 硬阴影 / 按压位移
+   - 色彩只做语义：primary（#FDC800 黄）仅用于主 CTA / focus ring / 激活态，不大面积铺色；
+     success 绿 / warning 琥珀 / destructive 红 各司其职，warning 不与品牌黄混用；黄不做文字色
+   - 表面：暖白 surface（#FBFBF9）+ 纯白卡片 + 深石板蓝正文（#1C293C）
+   - 明暗随系统（darkMode: media），两套 token 独立调校：暗色不是浅色取反，表面用暖炭色而非纯黑
+   - 字体：Inter 承担 UI 文本（中文回退 PingFang / 微软雅黑），JetBrains Mono 只给 biz / key / 路径 / 日志等机器可读文本
+   ========================================================================== */
+@layer base {
+  :root {
+    color-scheme: light;
+
+    --ink: 216 36% 17%;                 /* #1C293C 正文色 */
+
+    --background: 60 20% 98%;           /* #FBFBF9 暖白 surface */
+    --foreground: var(--ink);
+
+    --card: 0 0% 100%;                  /* 卡片纯白，在暖底上像一张贴纸 */
+    --card-foreground: var(--ink);
+
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--ink);
+
+    --primary: 47 100% 50%;             /* #FDC800 品牌黄：只做 CTA / 激活态 / focus ring */
+    --primary-foreground: var(--ink);   /* 黄底上必须用墨色字（≈12:1） */
+    --primary-hover: 47 100% 46%;
+
+    --secondary: 60 9% 94%;             /* 中性浅灰：secondary 按钮 / 徽章的「无语义」底 */
+    --secondary-foreground: var(--ink);
+
+    --muted: 60 9% 95%;
+    --muted-foreground: 220 9% 40%;     /* 暖白底上 ≥ 6:1 */
+
+    --accent: 60 9% 93%;                /* hover 底 */
+    --accent-foreground: var(--ink);
+
+    --destructive: 0 72% 51%;           /* #DC2626 */
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 76% 36%;             /* #16A34A */
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;              /* #D97706 */
+    --warning-foreground: var(--ink);
+
+    --border: 60 6% 88%;                /* 细淡边（偏暖） */
+    --border-muted: 60 6% 92%;          /* 表格行 / 弱分隔更淡一档 */
+    --input: 60 6% 84%;
+    --ring: var(--primary);             /* focus ring = 品牌黄 */
+    --link: 218 60% 46%;                /* 文字链接 / 行内动作：沉稳蓝（黄不做文字色） */
+
+    --radius: 0.5rem;
+
+    /* sidebar 令牌集（shadcn 标准命名） */
+    --sidebar-background: 60 14% 97%;   /* 与 surface 同一片暖白，靠 1px 线分区 */
+    --sidebar-foreground: 216 20% 30%;
+    --sidebar-primary: var(--primary);  /* 品牌块 */
+    --sidebar-primary-foreground: var(--ink);
+    --sidebar-accent: 60 6% 89%;        /* 选中项：中性浅灰圆角块（hover 用 /50 更淡） */
+    --sidebar-accent-foreground: var(--ink);
+    --sidebar-border: 60 6% 88%;
+    --sidebar-ring: var(--primary);
+
+    /* 限流分析图表：按请求结果分的语义色（浅色面已过 CVD / 对比度校验；深色面单独取步） */
+    --viz-ok: #0ca30c;
+    --viz-limited: #ec835a;
+    --viz-expired: #2a78d6;
+    --viz-blocked: #d03b3b;
+    --viz-error: #4a3aa7;
+    --viz-bar: #2a78d6;
+    --viz-grid: 60 6% 88%;
+  }
+
+  /* 暗色：独立调校，不是浅色取反 */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+
+      --ink: 45 15% 93%;
+
+      --background: 40 8% 10%;          /* 暖炭色 */
+      --foreground: 45 15% 93%;
+
+      --card: 40 7% 13%;
+      --card-foreground: 45 15% 93%;
+
+      --popover: 40 7% 13%;
+      --popover-foreground: 45 15% 93%;
+
+      --primary: 47 92% 52%;            /* 略降饱和，暗底上不刺眼 */
+      --primary-foreground: 40 8% 10%;
+      --primary-hover: 47 92% 47%;
+
+      --secondary: 40 6% 19%;
+      --secondary-foreground: 45 15% 93%;
+
+      --muted: 40 6% 18%;
+      --muted-foreground: 40 6% 70%;
+
+      --accent: 40 6% 21%;
+      --accent-foreground: 45 15% 93%;
+
+      --destructive: 0 75% 63%;
+      --destructive-foreground: 0 0% 100%;
+
+      --success: 142 60% 55%;
+      --success-foreground: 40 8% 10%;
+      --warning: 36 85% 60%;
+      --warning-foreground: 40 8% 10%;
+
+      --border: 40 6% 22%;
+      --border-muted: 40 6% 18%;
+      --input: 40 6% 26%;
+      --ring: var(--primary);
+      --link: 218 90% 74%;
+
+      --sidebar-background: 40 8% 12%;
+      --sidebar-foreground: 40 8% 78%;
+      --sidebar-primary: var(--primary);
+      --sidebar-primary-foreground: 40 8% 10%;
+      --sidebar-accent: 40 6% 21%;      /* 选中项：中性深灰块 */
+      --sidebar-accent-foreground: 45 15% 93%;
+      --sidebar-border: 40 6% 20%;
+      --sidebar-ring: var(--primary);
+
+      --viz-ok: #0ca30c;
+      --viz-limited: #c98500;
+      --viz-expired: #3987e5;
+      --viz-blocked: #d03b3b;
+      --viz-error: #9085e9;
+      --viz-bar: #3987e5;
+      --viz-grid: 40 6% 22%;
+    }
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    margin: 0;
+    /* 正文 15px（标尺 text-sm）：桌面控制台信息密度高，不用规范网页版的 17 */
+    font-size: 15px;
+    line-height: 1.45;
+    font-feature-settings: "cv11", "ss01", "tnum";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    @apply font-mono;
+    font-variant-ligatures: none;
+  }
+
+  /* 选区用品牌黄：与 focus ring 同一套「正在这里」语义 */
+  ::selection {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+}
