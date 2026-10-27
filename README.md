@@ -4,7 +4,7 @@
 
 使用已登录的微信会话，通过当前 Windows 原生列表与会话协议采集。公众号监测、列表采集和正文下载分别控制，文章与任务进度保存在本机。
 
-[下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose)
+[下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频（进群聊）](https://xhslink.cn/o/4uEpUqA9P13)
 
 > **v1.0.0 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 
