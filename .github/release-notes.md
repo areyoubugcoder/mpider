@@ -1,6 +1,6 @@
-## MPider v0.2.1 · Windows 原生采集工作台
+## MPider v1.0.0 · Windows 原生采集工作台
 
-本版采用 Windows 原生列表与会话协议采集，公众号监测、列表采集和正文下载分别控制。仅适配微信 **4.1.15.56 x64**，此临时版本用于真实下载、签名更新、安装与重启验收。
+本版采用 Windows 原生列表与会话协议采集，公众号监测、列表采集和正文下载分别控制。仅适配微信 **4.1.15.56 x64**，本版为正式开源发行。
 
 ### 本版变化
 
@@ -15,9 +15,9 @@
 
 | 附件 | 说明 |
 | --- | --- |
-| `MPider_0.2.1_x64-setup.exe` | 推荐的 NSIS 安装版 |
-| `MPider_0.2.1_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v0.2.1-windows-x64.zip` | 完整便携包，解压后运行 `MPider.exe`，保留 `runtime/` |
+| `MPider_1.0.0_x64-setup.exe` | 推荐的 NSIS 安装版 |
+| `MPider_1.0.0_x64_zh-CN.msi` | 中文 MSI 安装版 |
+| `MPider-v1.0.0-windows-x64.zip` | 完整便携包，解压后运行 `MPider.exe`，保留 `runtime/` |
 | `latest.json` / `*.sig` | 客户端更新清单与更新签名 |
 | `SHA256SUMS` / `verification.json` | 文件摘要与便携包离线自检记录 |
 
