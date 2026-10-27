@@ -12,7 +12,7 @@
 
 ## 版本与接口
 
-- 当前版本取 Tauri 项目配置（当前为 `0.2.1`），`package.json`、根 `Cargo.toml` 的工作区版本、`src-tauri/tauri.conf.json` 必须一致。发布标签为 `v<当前项目版本>`，不根据历史 GitHub Release 自动推算或递增。
+- 当前版本取 Tauri 项目配置（当前为 `1.0.0`），`package.json`、根 `Cargo.toml` 的工作区版本、`src-tauri/tauri.conf.json` 必须一致。发布标签为 `v<当前项目版本>`，不根据历史 GitHub Release 自动推算或递增。
 - 更新地址固定为 `https://github.com/areyoubugcoder/mpider/releases/latest/download/latest.json`，公开仓库无需在客户端放 GitHub Token。仅更高的稳定语义版本有效，同版、旧版、预发布版均不安装。草稿未公开时不会被客户端下载。
 - 静态清单包含 `version`、`pub_date`、`notes` 和 `platforms`；目前仅含 `windows-x86_64`。平台项含 `url` 和 `.sig` 文件的完整内容 `signature`。
 - Tauri updater 负责 HTTPS 请求、平台选择与签名验证，版本清单和安装包通过 GitHub Release 附件分发，不增加业务 HTTP 服务或数据库表。
@@ -44,7 +44,7 @@ pnpm tauri signer generate -w ~/.tauri/mpider-updater.key
 
 ## GitHub 发布
 
-1. 核对发布提交与标签；本次项目版本为 `0.2.1`，标签应为 `v0.2.1`。保留历史 Release 与标签，不覆盖仍在服务用户的版本。
+1. 核对发布提交与标签；本次项目版本为 `1.0.0`，标签应为 `v1.0.0`。保留历史 Release 与标签，不覆盖仍在服务用户的版本。
 2. 按项目主线/开源发布流程准备发布提交。需要升级版本时，同时修改三个版本文件及锁文件；本功能不会自行修改项目版本。
 3. 将匹配当前项目版本的 `v*` 标签推送到 GitHub。工作流先核对版本与签名配置，再为 Windows x64 构建；缺少签名配置时标签发布立即失败。
 4. Windows 构建成功后整理附件并生成 `latest.json`，创建 Release **预发布草稿**；保留完整便携 ZIP、自检与摘要，同时提供携带相同 Python 运行环境和完整许可证的 NSIS/MSI。Windows 更新默认使用 NSIS `-setup.exe`；MSI 仍提供手动安装。工作流不构建或上传 macOS 产物。
@@ -79,4 +79,4 @@ pnpm dlx postman-cli@1.77.0 simulation run postman/simulations/updater-download.
 MPIDER_UPDATER_TEST_ENDPOINT=http://127.0.0.1:4918/github cargo test -p mpider-tauri network_simulation --lib -- --ignored
 ```
 
-测试只能证明本地逻辑和模拟下载链路；正式发布前仍需用两个真实签名版本验证 Windows 安装、系统权限和重启。不会在开发期间自动替换用户正在使用的应用。
+上面的模拟测试只证明本地 HTTP 与缓存逻辑。发行准备另已完成 0.2.0 → 0.2.1 的真实 GitHub 下载、签名验证、Windows 安装及自动重启，核对原有正文、配置和归档内容保留。正式版本的具体产物与验收结果见对应 Release；不将安装升级结果当作微信采集或长期稳定性证据。

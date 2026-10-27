@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: MPider 版本与来源
-      placeholder: 如 v0.2.0，GitHub Release / 自行构建（请注明提交）
+      placeholder: 如 v1.0.0，GitHub Release / 自行构建（请注明提交）
     validations:
       required: true
   - type: input
