@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -27,7 +27,7 @@ jobs:
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
         run: cargo test --locked -p mpider-core -p article-md -p mpider-tauri
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         if: runner.os == 'Windows'
         with:
           python-version: "3.12"
@@ -43,18 +43,18 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc --noEmit -p frontend/tsconfig.json
       - run: pnpm build
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: 原生桥协议离线测试
