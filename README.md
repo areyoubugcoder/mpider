@@ -6,7 +6,7 @@
 
 [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose)
 
-> **v0.2.0 · Windows x64 工作台预览版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
+> **v0.2.1 · Windows x64 更新验收版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 
 ## 软件截图
 
@@ -49,9 +49,9 @@
 
 | 下载文件 | 用途 |
 | --- | --- |
-| `MPider_0.2.0_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
-| `MPider_0.2.0_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v0.2.0-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
+| `MPider_0.2.1_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
+| `MPider_0.2.1_x64_zh-CN.msi` | 中文 MSI 安装版 |
+| `MPider-v0.2.1-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
 | `SHA256SUMS` | 核对下载文件的 SHA-256 |
 
 三个客户端包均携带 Python **3.12.10**、Frida **17.23.3**、cryptography **50.0.2** 及所需许可，无需另外安装 Python、Node.js、pnpm 或 Rust。微信和 WebView2 需要自行安装。不要只复制便携包内的 EXE。
@@ -59,7 +59,7 @@
 安装包附带应用更新签名，用于 MPider 验证更新文件；它不等同于 Windows 开发者代码签名，系统仍可能提示发布者未知。可先核对附件摘要：
 
 ```powershell
-Get-FileHash .\MPider_0.2.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\MPider_0.2.1_x64-setup.exe -Algorithm SHA256
 ```
 
 ## 开始采集

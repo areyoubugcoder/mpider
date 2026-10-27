@@ -181,6 +181,6 @@ jobs:
               exit 1
             fi
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "MPider $RELEASE_TAG · Windows 工作台预览" --notes-file "$RUNNER_TEMP/mpider-release-notes.md"
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "MPider $RELEASE_TAG · Windows x64" --notes-file "$RUNNER_TEMP/mpider-release-notes.md"
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
