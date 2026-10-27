@@ -1,6 +1,6 @@
 # 当前工作台的实现原理
 
-本文对应最新 Windows 原生工作台：监测登记与文章采集分离。详细契约见[按公众号操作](source-actions.md)、[会话自动恢复](home-sync-recovery.md)、[分页](pagination-tasks.md)与[状态和正文操作](status-progress-article-actions.md)。
+本文对应最新 Windows 原生工作台：监测登记与文章采集分离。操作步骤见 [README](../README.md)，协议细节见[会话与游标](wechat-session-protocol.md)。
 
 ## 监测、首页同步与历史采集
 
@@ -37,8 +37,8 @@
 
 实验室默认隐藏，在设置开启后可固定游标与会话定时验证，响应只做证据、不推进正式历史检查点。关闭入口不删除实验或停止已启动的实验。会话过期只截断测量，不能据此认定游标失效。
 
-[单样本观察](cursor-lifetime-validation-20261023.md)记录了旧游标约 33 小时后配合新会话复用的单样本观察；另有原任务更换会话后沿旧游标成功续采。它们证明这些样本的跨会话复用能力，不是统一 TTL、到期上限或闲置寿命，也不替代最新自动恢复流程的真机验收。
+会话与游标的有效期分别判断；更新会话后可尝试沿原检查点继续。单次成功不能证明统一有效期或长期稳定性。
 
 当前仅验证微信4.1.15.56 x64的模块和函数指纹。原生模式不安装根证书、不切换系统代理；Frida附加已有微信退出记录，长期稳定性仍需验证。会话与原始协议证据受DPAPI保护，文章、日志和普通导出由用户自行保护，详见[安全政策](../SECURITY.md)。
 
-代码分工：`frontend/`为React界面，`src-tauri/`为IPC和桌面壳，`crates/core/src/workbench/`管理调度、恢复、下载与实验，`crates/core/src/store/`是数据库入口，`native/`提供观察与会话协议工作进程。完整契约见[工作台设计](windows-workbench.md)，协议研究见[会话与游标](wechat-session-protocol.md)。
+代码分工：`frontend/`为React界面，`src-tauri/`为IPC和桌面壳，`crates/core/src/workbench/`管理调度、恢复、下载与实验，`crates/core/src/store/`是数据库入口，`native/`提供观察与会话协议工作进程。协议细节见[会话与游标](wechat-session-protocol.md)。

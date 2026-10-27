@@ -24,3 +24,15 @@
 客户端包附带 Python 3.12.10、Frida 17.23.3、cryptography 50.0.2 与第三方许可，无需安装开发环境。另需 Windows 10/11 x64、WebView2 和已登录的适配微信。首次登记和更新会话需要解锁且可交互的桌面。
 
 升级前备份系统设置显示的完整数据目录。便携版迁移到安装版后使用应用内更新；预发布版本不进入稳定更新通道。更新签名不等同于 Windows 开发者代码签名，系统可能提示未知发布者。
+
+### 使用与验证范围
+
+开启公众号监测后，在微信手动打开目标主页；随后在公众号行发起首页同步或历史采集，再单独下载正文。程序不替你操作微信窗口，不要求根证书或系统代理。
+
+本版发布流程在 Windows 检查前端类型、Rust 格式与 Clippy，运行 Rust / Python / Node 离线回归，构建便携包并重新解压验证文件摘要、Python 依赖和虚构材料 AES-GCM / DPAPI 往返，再构建 NSIS / MSI 与签名更新清单。`verification.json` 记录包内源码 revision；Release 附件的 `SHA256SUMS` 对应本次产物。
+
+发行准备已在 Windows 通过 0.2.0 → 0.2.1 的真实 GitHub 更新检查、下载安装包、版本绑定验签、安装和自动重启，并核对文章正文、配置及归档内容保持不变。没有开启微信监测或新增采集请求；安装升级验证不代表真实采集或长期稳定性通过。具体版本的产物与实际验收结果以本 Release 附件和说明为准。
+
+Frida 附加曾导致微信退出；会话可能过期，微信可能要求验证或限制账号。默认间隔、并发与预算只是本地节制配置，不保证免封控。当前仅验证微信 4.1.15.56 x64，指纹不匹配时停止。只采集你有权获取和保存的内容。
+
+[开始使用](https://github.com/areyoubugcoder/mpider#开始采集) · [更新记录](https://github.com/areyoubugcoder/mpider/blob/main/CHANGELOG.md) · [问题反馈](https://github.com/areyoubugcoder/mpider/issues/new/choose)

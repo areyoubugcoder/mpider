@@ -23,3 +23,6 @@ trace/
 
 # Claude Code 本地工作区（worktree 检出、会话产物）
 .claude/
+
+# 本地研究、开发过程记录与发布验收资料
+/.local-notes/

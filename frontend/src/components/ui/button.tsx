@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 /**
- * 按钮体系（docs/ui-baseline.md）：形态沿用 shadcn 扁平样式，差异只在填色——
+ * 按钮体系：形态沿用 shadcn 扁平样式，差异只在填色——
  * default（黄）= 页面主 CTA；outline = 中性次操作；destructive（红）= 不可逆；ghost / link = 行内动作。
  * 黄不做文字色，link 变体用沉稳蓝（--link）。
  */

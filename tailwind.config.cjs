@@ -2,7 +2,7 @@
 // CommonJS（.cjs）：仓库根 package.json 是 `type: module`，用 .cjs 让 require/module.exports 生效，
 // 避免 ESM/CJS 混用。content 路径相对 cwd（= 仓库根，pnpm 脚本从这里跑）解析。
 // darkMode: "media" —— 主题跟随系统明暗色（需求 §9）。
-// 视觉基线（色彩 / 字体 / 字号标尺）见 docs/ui-baseline.md，token 定义在 frontend/src/index.css。
+// 视觉 token（色彩 / 字体 / 字号标尺）定义在 frontend/src/index.css。
 module.exports = {
   darkMode: "media",
   content: ["./frontend/index.html", "./frontend/src/**/*.{ts,tsx}"],

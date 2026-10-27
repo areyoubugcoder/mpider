@@ -1,6 +1,6 @@
 # 贡献指南
 
-提交问题先查看 [README](README.md)、[更新记录](CHANGELOG.md) 和[已知验证边界](docs/windows-workbench-validation.md)。功能问题使用 [Issue 模板](https://github.com/areyoubugcoder/mpider/issues/new/choose)；漏洞请走[安全政策](SECURITY.md)中的私密渠道。
+提交问题先查看 [README](README.md)、[更新记录](CHANGELOG.md) 和[使用条件与验证边界](README.md#请求控制与适配范围)。功能问题使用 [Issue 模板](https://github.com/areyoubugcoder/mpider/issues/new/choose)；漏洞请走[安全政策](SECURITY.md)中的私密渠道。
 
 ## 开发环境
 
@@ -43,9 +43,9 @@ pnpm test
 - 工作台列表请求共用锁、策略闸门和持久化账本；正文、图片、重试和实验请求也需记账，不旁路预算与冷却。
 - 普通 IPC、日志、截图及导出不得包含会话密钥、原始游标或完整协议载荷；真实数据、抓包、个人账号和内网地址不得提交。测试夹具使用虚构值。
 - 微信 profile 必须核对模块摘要、函数指纹与桥协议，不能只替换版本号或复制旧 RVA。
-- 变更配置、接口、数据库 schema 或行为时，同步更新文档。界面样式遵循[视觉基线](docs/ui-baseline.md)。
+- 变更配置、接口、数据库 schema 或行为时，同步更新文档。界面样式沿用现有组件、颜色变量和交互模式。
 
-历史代理链路另需保留 TLS/SNI 直通、`SystemProxyGuard` 复位及 `collect_list` 的计账规则；不要把旧 getmsg 错误码语义套到当前原生链路。架构见 [CLAUDE.md](CLAUDE.md) 与[工作台设计](docs/windows-workbench.md)。
+历史代理链路另需保留 TLS/SNI 直通、`SystemProxyGuard` 复位及 `collect_list` 的计账规则；不要把旧 getmsg 错误码语义套到当前原生链路。架构见 [CLAUDE.md](CLAUDE.md) 与[实现原理](docs/how-it-works.md)。
 
 ## 真机验证
 
