@@ -88,7 +88,7 @@ Get-FileHash .\MPider_1.0.0_x64-setup.exe -Algorithm SHA256
 
 Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地归档。Python / Frida 在本机观察已登录微信的原生列表调用；获取会话后，工作进程构造与验证协议请求，Rust 原子保存文章、游标和任务进度。首页同步和历史采集分别维护进度，会话更新后可沿检查点继续。
 
-**使用当前工作台不需要安装根证书、修改系统代理、标定点击坐标或配置种子链接。** 详细流程见[实现原理](docs/how-it-works.md)、[会话恢复](docs/home-sync-recovery.md)和[协议设计](docs/wechat-session-protocol.md)。
+**使用当前工作台不需要安装根证书、修改系统代理、标定点击坐标或配置种子链接。** 详细流程见[实现原理](docs/how-it-works.md)和[协议说明](docs/wechat-session-protocol.md)。
 
 ## 请求控制与适配范围
 
@@ -96,7 +96,7 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 
 微信可能要求验证、使会话失效、限制请求或账号。Frida 附加已有导致微信退出的记录，长期稳定性仍需验证。程序遇到不匹配的模块或函数指纹会停止，不能仅改微信版本号强行适配。出现验证或频率限制时应停止任务并查看日志。
 
-会话有效期与游标可复用时间分别判断，不设统一寿命承诺。已有[旧游标约 33 小时后配合新会话复用的单样本观察](docs/cursor-lifetime-validation-20261023.md)，该样本不能推广到所有公众号。已在 Windows 完成 **0.2.0 → 0.2.1** 的真实 GitHub 更新检查、下载验签、安装重启及数据保留验证。安装升级与真实采集、长期稳定性分别验收，范围见[记录](docs/windows-workbench-validation.md)。
+会话有效期与游标可复用时间分别判断；会话过期时应更新会话，再判断历史检查点是否可继续使用，不承诺统一有效期。真实采集、长期稳定性、安装升级分别验证；每个版本的发行验收结果见 [GitHub Releases](https://github.com/areyoubugcoder/mpider/releases)。
 
 ## 数据与隐私
 
@@ -121,9 +121,9 @@ cargo test --locked -p mpider-core -p article-md -p mpider-tauri
 pnpm tauri dev
 ```
 
-Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。CI 检查前端与 Windows Rust；客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
+Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。CI 按改动路径检查前端与 Windows Rust，纯文档或截图修改跳过构建；编入界面的 FAQ、实验室与请求策略文档仍触发检查。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
 
-[贡献指南](CONTRIBUTING.md) · [工作台设计](docs/windows-workbench.md) · [更新记录](CHANGELOG.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
+[贡献指南](CONTRIBUTING.md) · [实现原理](docs/how-it-works.md) · [更新记录](CHANGELOG.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 本项目以 [MIT](LICENSE) 开源。
 

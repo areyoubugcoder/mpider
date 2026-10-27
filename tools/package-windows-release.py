@@ -25,17 +25,8 @@ PUBLIC_DOCUMENTS = (
     "docs/article-export.md",
     "docs/source-deletion.md",
     "docs/app-updates.md",
-    "docs/ui-baseline.md",
-    "docs/windows-workbench.md",
     "docs/system-logs.md",
     "docs/wechat-session-protocol.md",
-    "docs/windows-workbench-validation.md",
-    "docs/wechat-native-methodology.md",
-    "docs/cursor-lifetime-validation-20261023.md",
-    "docs/home-sync-recovery.md",
-    "docs/source-actions.md",
-    "docs/pagination-tasks.md",
-    "docs/status-progress-article-actions.md",
     "docs/screenshots/workbench-sources.png",
     "docs/screenshots/workbench-articles.png",
     "docs/screenshots/workbench-tasks.png",
@@ -137,7 +128,7 @@ def main():
     for filename in ("CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md"):
         if (ROOT / filename).is_file():
             shutil.copy2(ROOT / filename, stage / filename)
-    # 只带已审阅文档与两张无真实数据的演示截图；缺文件即停止，不回退旧截图。
+    # 只带已审阅文档与三张无真实数据的演示截图；缺文件即停止，不回退旧截图。
     for document_name in PUBLIC_DOCUMENTS:
         path = ROOT / document_name
         if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(ROOT.resolve()):
@@ -147,7 +138,7 @@ def main():
         shutil.copy2(path, destination)
     shutil.copy2(ROOT / "tools/windows-runtime.lock.json", stage / "runtime-lock.json")
     (stage / "使用说明.txt").write_text(
-        "MPider Windows x64 便携预览版\n\n"
+        "MPider Windows x64 便携版\n\n"
         "完整解压到可写目录，双击 MPider.exe；不要只复制 EXE。\n"
         "依赖 Windows 10/11 x64、Microsoft WebView2、已登录的匹配版本微信。\n"
         "已附 Python/Frida，无需安装 Node.js、pnpm、Rust 或系统 Python。\n"

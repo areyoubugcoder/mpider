@@ -58,6 +58,6 @@
 - 实验室默认隐藏，可在设置开启；关闭入口保留已有实验和后台进度。移除文章 ZIP 归档，保留正文缓存、本地阅读及 Markdown/实验数据导出。
 - 整理 README、时间线、隐私与安全说明、Issue/PR 模板和演示截图；准备附带固定 Python/Frida、许可、清单与 SHA-256 的完整 Windows x64 便携 ZIP。
 
-此前候选包的启动截图、文件数、许可数及摘要不作为本版本验收证据，当前构建及实机验证范围见对应 Release 和[验证记录](docs/windows-workbench-validation.md)。
+此前候选包的启动截图、文件数、许可数及摘要不作为本版本验收证据，当前构建及实机验证范围见对应 [Release](https://github.com/areyoubugcoder/mpider/releases)。
 
 已知限制：仅验证微信 4.1.15.56 x64；Frida 附加曾导致微信退出，长期稳定性仍待验证。会话可能过期，游标复用没有固定寿命保证，预算与冷却不构成免封控承诺。旧 getmsg 列表接口依然不可用。

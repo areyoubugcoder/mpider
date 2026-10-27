@@ -5,7 +5,7 @@
 /* ============================================================================
    主题 token（HSL 三元组，供 tailwind.config.cjs 里 hsl(var(--x)) 消费）。
 
-   设计基线：沉静 · 工具感（见 docs/ui-baseline.md）
+   设计基线：沉静 · 工具感
    - 线条保持 shadcn 原有的细淡风格：1px 淡边、shadow-sm 柔和阴影，不做粗边 / 硬阴影 / 按压位移
    - 色彩只做语义：primary（#FDC800 黄）仅用于主 CTA / focus ring / 激活态，不大面积铺色；
      success 绿 / warning 琥珀 / destructive 红 各司其职，warning 不与品牌黄混用；黄不做文字色

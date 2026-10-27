@@ -174,7 +174,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          cat .github/release-notes.md docs/release-notes.md > "$RUNNER_TEMP/mpider-release-notes.md"
+          cp .github/release-notes.md "$RUNNER_TEMP/mpider-release-notes.md"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" != "true" ]; then
               echo "Release 已公开，禁止覆盖已有版本；请先核对历史版本或使用新版本号。"

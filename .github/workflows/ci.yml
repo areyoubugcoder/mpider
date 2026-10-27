@@ -2,12 +2,37 @@ name: CI
 
 on:
   push:
-    branches: [main, master, opensource]
+    branches: [main]
   pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 核验路径过滤规则
+        run: python3 -m unittest discover -s tools -p 'test_ci_changes.py'
+      - name: 判断是否需要构建
+        id: filter
+        run: python3 tools/ci-changes.py
+
   rust:
     name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,6 +66,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
