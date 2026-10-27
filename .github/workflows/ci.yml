@@ -30,14 +30,10 @@ jobs:
         run: python3 tools/ci-changes.py
 
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust (windows-latest)
     needs: changes
     if: needs.changes.outputs.build == 'true'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
