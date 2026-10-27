@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, opensource]
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
+        run: cargo test --locked -p mpider-core -p article-md -p mpider-tauri
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with:
+          python-version: "3.12"
+      - name: Windows 原生协议离线测试
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install -r native/requirements.txt
+          python -B -m unittest discover -s native -p 'test_*.py'
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit -p frontend/tsconfig.json
+      - run: pnpm build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 原生桥协议离线测试
+        run: |
+          python -m pip install -r native/requirements.txt
+          python -m unittest discover -s native -p 'test_*.py'
+      - name: 界面契约与原生桥回归
+        run: pnpm test

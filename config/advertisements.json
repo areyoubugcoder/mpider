@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "enabled": true,
+  "interval_seconds": 6,
+  "items": [
+    {
+      "id": "mp2rss",
+      "enabled": true,
+      "title": "持续订阅公众号更新，接入 RSS 与 AI 工作流 · MP2Rss",
+      "compact_title": "持续订阅公众号更新 · MP2Rss",
+      "url": "https://mp2rss.bugcode.dev/?from=mpider"
+    },
+    {
+      "id": "mphistory",
+      "enabled": true,
+      "title": "想下载公众号历史文章？试试公众号历史文章下载",
+      "compact_title": "下载公众号历史文章 · mphistory",
+      "url": "https://mphistory.followto.us/"
+    }
+  ]
+}

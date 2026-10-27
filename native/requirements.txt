@@ -1,0 +1,3 @@
+# 原生桥与会话协议的已验证依赖；不安装 frida-tools。
+frida==17.23.3
+cryptography==50.0.2

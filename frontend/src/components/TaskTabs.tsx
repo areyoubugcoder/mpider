@@ -1,0 +1,6 @@
+/** 任务标签页：单一面板、键盘方向键切换，状态管理与分页彼此独立。 */
+import type { Task } from "@/lib/workbench";
+const tabs=[{value:"home",label:"首页同步"},{value:"history",label:"历史采集"},{value:"archive",label:"正文下载"}] as const;
+export function TaskTabs({value,onChange}:{value:Task["kind"];onChange:(kind:Task["kind"])=>void}){
+ return <div role="tablist" aria-label="任务类型" className="flex flex-wrap gap-1 border-b pb-2">{tabs.map((tab,index)=><button key={tab.value} id={`task-tab-${tab.value}`} aria-controls="task-panel" type="button" role="tab" aria-selected={value===tab.value} tabIndex={value===tab.value?0:-1} className={`rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value===tab.value?"bg-muted font-medium":"text-muted-foreground hover:bg-muted/50"}`} onClick={()=>onChange(tab.value)} onKeyDown={event=>{let next=index;if(event.key==="ArrowRight")next=(index+1)%tabs.length;else if(event.key==="ArrowLeft")next=(index+tabs.length-1)%tabs.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=tabs.length-1;else return;event.preventDefault();onChange(tabs[next].value);event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();}}>{tab.label}</button>)}</div>;
+}

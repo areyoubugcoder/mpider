@@ -1,0 +1,8 @@
+# 仅供本地验证 GitHub 清单与签名下载，启动方式见同目录的上下文文档。
+
+simulation: updater-download
+routing: path
+mocks:
+  - name: updater-release
+    routeKey: github
+    path: postman/mocks/updater-release

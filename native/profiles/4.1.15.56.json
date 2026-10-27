@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "wechat_version": "4.1.15.56",
+  "module_sha256": "e0428a7b691853de496532523c2c09aa095f90941c37c9f4cfb3f137f3c66556",
+  "session_psk": {
+    "rva": "0x670a8c0",
+    "expected": "555657534881ec38020000488dac2480"
+  },
+  "hooks": [
+    {
+      "rva": "0x1f2d3f0",
+      "expected": "5541565657534881ec20030000488dac"
+    },
+    {
+      "rva": "0x1f335ea",
+      "expected": "90488bb500010000b902000000e8e497",
+      "frame_string": 240
+    }
+  ],
+  "ui": {
+    "refresh_mode": "ctrl_r",
+    "refresh_x": 78,
+    "refresh_y": 20,
+    "min_width": 600,
+    "min_height": 400
+  }
+}

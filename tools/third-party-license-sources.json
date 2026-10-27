@@ -1,0 +1,140 @@
+{
+  "packages": {
+    "alloc-stdlib@0.2.4": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/ae42d22078b98549e987d2f03d12df7b984fde47/LICENSE",
+      "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+    },
+    "asn1-rs-impl@0.2.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-MIT",
+      "sha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513"
+    },
+    "clipboard-win@5.4.1": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    "defmt-parser@1.0.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+      "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50"
+    },
+    "fxhash@0.2.1": {
+      "standard_license": "Apache-2.0",
+      "include_source": true
+    },
+    "mac@0.1.1": {
+      "standard_license": "Apache-2.0",
+      "include_source": true
+    },
+    "match_token@0.1.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/servo/html5ever/0e4e125b8672abad4ff14d1e0043d3be9305af6a/LICENSE-MIT",
+      "sha256": "86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3"
+    },
+    "match_token@0.35.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/servo/html5ever/6db7bbf1c4dfaecd28731950d427e40c8b911bef/LICENSE-MIT",
+      "sha256": "86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3"
+    },
+    "selectors@0.31.0": {
+      "standard_license": "MPL-2.0",
+      "include_source": true
+    },
+    "selectors@0.36.1": {
+      "standard_license": "MPL-2.0",
+      "include_source": true
+    },
+    "unic-char-property@0.9.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    "unic-char-range@0.9.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    "unic-common@0.9.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    "unic-ucd-ident@0.9.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    "unic-ucd-version@0.9.0": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    "webview2-com@0.38.2": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+    },
+    "webview2-com-macros@0.8.1": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+    },
+    "webview2-com-sys@0.38.2": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+    },
+    "dlv@1.1.3": {
+      "standard_license": "MIT",
+      "include_source": true
+    },
+    "react-remove-scroll-bar@2.3.8": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/theKashey/react-remove-scroll-bar/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
+      "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84"
+    },
+    "alloc-stdlib@0.3.0": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE",
+      "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+    },
+    "tauri-plugin@2.7.2": {
+      "filename": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/tauri-apps/tauri/59b63ab500da9859f12d8888c3298bc29bba0b92/LICENSE-MIT",
+      "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
+    },
+    "webview2-com@0.39.1": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+    },
+    "webview2-com-sys@0.39.1": {
+      "filename": "LICENSE",
+      "url": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+    },
+    "selectors@0.38.0": {
+      "standard_license": "MPL-2.0",
+      "include_source": true
+    }
+  },
+  "standard_licenses": {
+    "Apache-2.0": {
+      "filename": "Apache-2.0.txt",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "MPL-2.0": {
+      "filename": "MPL-2.0.txt",
+      "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    },
+    "MIT": {
+      "filename": "MIT.txt",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+    }
+  }
+}

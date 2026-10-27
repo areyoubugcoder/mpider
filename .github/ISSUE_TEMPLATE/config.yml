@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用说明与支持范围
+    url: https://github.com/areyoubugcoder/mpider/blob/main/README.md
+    about: 先确认 Windows、微信版本、运行环境与已知限制。
+  - name: 安全漏洞与敏感材料
+    url: https://github.com/areyoubugcoder/mpider/blob/main/SECURITY.md
+    about: 不要在公开 Issue 上传会话、数据库或漏洞利用细节。

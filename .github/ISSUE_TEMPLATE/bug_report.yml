@@ -1,0 +1,54 @@
+name: 问题反馈
+description: 报告功能、兼容性或运行问题（安全漏洞请使用私密渠道）
+title: "[问题] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看 README、更新记录和已有 Issue。不要上传数据库、会话文件、原始抓包、完整协议响应或未脱敏日志。此表单不会自动收集或上传本机材料。
+        安全漏洞请参阅 [安全政策](https://github.com/areyoubugcoder/mpider/blob/main/SECURITY.md)，勿在公开 Issue 披露细节。
+  - type: input
+    id: version
+    attributes:
+      label: MPider 版本与来源
+      placeholder: 如 v0.2.0，GitHub Release / 自行构建（请注明提交）
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与微信版本
+      description: 填写系统版本、x64/ARM64、微信完整版本；不要填写个人微信号或设备标识。
+      placeholder: 如 Windows 11 x64，微信 4.1.15.56
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 使用虚构名称描述操作；说明首次出现时间及是否每次发生。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 预期与实际结果
+      description: 描述界面提示、任务状态和影响范围；不要粘贴带凭据的接口链接。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 必要的脱敏证据（可选）
+      description: 仅提供与本问题相关的少量日志或脱敏截图。先遮盖账号、文章标识、本地路径、密钥与 token，不要上传完整诊断包。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已检查所附文本和文件，不包含密钥、token、数据库、原始抓包或个人账号资料。
+          required: true

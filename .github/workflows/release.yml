@@ -1,0 +1,186 @@
+name: Release
+
+# Windows x64 同时保留完整便携包与 NSIS/MSI 更新安装包。
+# tag 生成预发布草稿，人工核验后再公开；手动触发仅留存 artifact。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64 便携包与更新安装包
+    runs-on: windows-latest
+    env:
+      MPIDER_UPDATER_PUBLIC_KEY: ${{ vars.MPIDER_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-x64
+          workspaces: . -> target
+          cache-on-failure: true
+
+      - name: 核对当前项目版本、标签与更新签名
+        run: node tools/release-updater.mjs prepare
+
+      - name: 安装验证依赖
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          python -m pip install -r native/requirements.txt
+      - name: 发行许可预检
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python tools/collect-third-party-licenses.py --output (Join-Path $env:RUNNER_TEMP 'mpider-license-preflight') --cache dist-windows/.downloads
+      - name: 类型、格式与 Rust 静态检查
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm exec tsc --noEmit -p frontend/tsconfig.json
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Windows 离线回归
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --locked -p mpider-core -p article-md -p mpider-tauri
+          python -B -m unittest discover -s native -p 'test_*.py'
+          pnpm test
+
+      - name: 构建、组装并自检便携包
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -Release -Portable -PythonPath python -SourceRevision $env:GITHUB_SHA
+
+      - name: 核验最终 ZIP 解压结果
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem dist-windows/MPider-*-windows-x64.zip
+          if (@($archive).Count -ne 1) { throw '应当只有一个发行 ZIP' }
+          $expected = ((Get-Content dist-windows/SHA256SUMS -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'ZIP 摘要错误' }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'mpider-release-unpacked'
+          Expand-Archive $archive.FullName $unpacked
+          python tools/verify-windows-release.py --directory $unpacked
+          if ($LASTEXITCODE -ne 0) { throw '解压后的发行包自检失败' }
+
+      - name: 为安装包配置同一份已验证运行环境与完整许可
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw -Encoding UTF8 | ConvertFrom-Json).version
+          $portable = (Resolve-Path "dist-windows/MPider-v$version-windows-x64").Path
+          $resources = @{}
+          # Tauri 的目录映射保留层级；Windows 资源目录位于主 EXE 旁边。
+          foreach ($directory in @('runtime', 'licenses', 'docs')) {
+            $source = (Join-Path $portable $directory).Replace('\', '/') + '/'
+            if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "安装资源缺失：$directory" }
+            $resources[$source] = "$directory/"
+          }
+          foreach ($name in @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md', 'runtime-lock.json', '使用说明.txt')) {
+            $source = Join-Path $portable $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "安装资料缺失：$name" }
+            $resources[$source.Replace('\', '/')] = $name
+          }
+          $configuration = @{ bundle = @{ targets = @('nsis', 'msi'); resources = $resources } }
+          $configuration | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:RUNNER_TEMP 'mpider-installer-resources.json') -Encoding utf8
+
+      - name: 构建带运行环境的 NSIS 与 MSI 安装包
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          # 与便携包共用 Windows x64 runner 的原生 target/release，复用已编译依赖。
+          pnpm tauri build --config (Join-Path $env:RUNNER_TEMP 'mpider-installer-resources.json')
+
+      - name: 汇总便携包、安装包、签名与验收记录
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node tools/release-updater.mjs stage target/release/bundle release-assets x86_64-pc-windows-msvc
+          Copy-Item dist-windows/MPider-*-windows-x64.zip release-assets/
+          Copy-Item dist-windows/verification.json release-assets/
+          $sums = Get-ChildItem release-assets -File | Sort-Object Name | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          }
+          $sums | Set-Content release-assets/SHA256SUMS -Encoding ascii
+
+      - name: 留存完整发行包与验收记录
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpider-windows-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: release-assets/*
+
+      - name: 失败时留存已生成文件以便排查
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpider-windows-partial
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            dist-windows/MPider-*-windows-x64.zip
+            dist-windows/SHA256SUMS
+            dist-windows/verification.json
+            target/release/bundle/nsis/*
+            target/release/bundle/msi/*
+
+  publish:
+    name: 汇总签名更新清单并创建预发布草稿
+    if: github.ref_type == 'tag'
+    needs: windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpider-windows-x64
+          path: release-assets
+      - name: 生成 Windows 更新清单及完整摘要
+        run: |
+          node tools/release-updater.mjs manifest release-assets "$GITHUB_REPOSITORY"
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/mpider-SHA256SUMS"
+          mv "$RUNNER_TEMP/mpider-SHA256SUMS" SHA256SUMS
+      - name: 创建草稿并上传全部产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat .github/release-notes.md docs/release-notes.md > "$RUNNER_TEMP/mpider-release-notes.md"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" != "true" ]; then
+              echo "Release 已公开，禁止覆盖已有版本；请先核对历史版本或使用新版本号。"
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "MPider $RELEASE_TAG · Windows 工作台预览" --notes-file "$RUNNER_TEMP/mpider-release-notes.md"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
