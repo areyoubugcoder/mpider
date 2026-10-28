@@ -187,7 +187,7 @@ cargo test --locked -p mpider-core -p article-md -p mpider-tauri
 pnpm tauri dev
 ```
 
-Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。CI 按改动路径检查前端与 Windows Rust，纯文档或截图修改跳过构建；编入界面的 FAQ、实验室与请求策略文档仍触发检查。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
+Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。CI 按改动路径检查前端与 Windows Rust：main 上仅修改公开资料、协作模板、`.gitignore`、本地 Postman 模拟或未使用的 Android/iOS 图标时不触发 CI，PR 保留路径判断以满足必需检查、跳过构建；编入界面的更新记录、FAQ、实验室与请求策略文档仍触发检查。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
 
 [贡献指南](CONTRIBUTING.md) · [实现原理](docs/how-it-works.md) · [更新记录](CHANGELOG.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
