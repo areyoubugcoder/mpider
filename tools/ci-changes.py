@@ -1,4 +1,4 @@
-"""仅让影响应用或构建的改动运行完整 CI；纯公开资料改动跳过构建。"""
+"""仅让影响应用或构建的改动运行完整 CI；与 workflow 的 push 路径过滤同步。"""
 
 import json
 import os
@@ -6,21 +6,36 @@ from pathlib import Path
 import subprocess
 
 EMBEDDED_GUIDES = {
+    "CHANGELOG.md",
     "docs/faq.md",
     "docs/laboratory.md",
     "docs/request-policy.md",
 }
+
+NON_BUILD_FILES = {
+    ".gitignore",
+    ".github/release-notes.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+}
+
+NON_BUILD_PREFIXES = (
+    "docs/",
+    ".github/ISSUE_TEMPLATE/",
+    # 当前 CI 不启动这些本地模拟，也不构建移动端。
+    "postman/mocks/",
+    "postman/simulations/",
+    "src-tauri/icons-v2/android/",
+    "src-tauri/icons-v2/ios/",
+)
 
 
 def requires_build(paths):
     for path in paths:
         if path in EMBEDDED_GUIDES:
             return True
-        if path.startswith(("docs/", ".github/ISSUE_TEMPLATE/")):
+        if path in NON_BUILD_FILES or path.startswith(NON_BUILD_PREFIXES):
             continue
         if "/" not in path and (path.endswith(".md") or path == "LICENSE"):
-            continue
-        if path in {".github/release-notes.md", ".github/pull_request_template.md"}:
             continue
         return True
     return False
