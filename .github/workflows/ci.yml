@@ -1,29 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    # 在触发前过滤不影响当前构建的文件；与 tools/ci-changes.py 保持一致。
-    paths:
-      - '**'
-      - '!*.md'
-      - '!LICENSE'
-      - '!.gitignore'
-      - '!docs/**'
-      - '!.github/ISSUE_TEMPLATE/**'
-      - '!.github/release-notes.md'
-      - '!.github/PULL_REQUEST_TEMPLATE.md'
-      - '!postman/mocks/**'
-      - '!postman/simulations/**'
-      - '!src-tauri/icons-v2/android/**'
-      - '!src-tauri/icons-v2/ios/**'
-      - 'CHANGELOG.md'
-      - 'docs/faq.md'
-      - 'docs/laboratory.md'
-      - 'docs/request-policy.md'
   pull_request:
     branches: [main]
-    # 保留必需检查结果，避免纯文档 PR 因缺少状态而无法合并。
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,21 +17,24 @@ jobs:
     name: Changed paths
     runs-on: ubuntu-latest
     outputs:
-      build: ${{ steps.filter.outputs.build }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      rust: ${{ steps.filter.outputs.rust }}
+      native: ${{ steps.filter.outputs.native }}
+      ci: ${{ steps.filter.outputs.ci }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - name: 核验路径过滤规则
-        run: python3 -m unittest discover -s tools -p 'test_ci_changes.py'
-      - name: 判断是否需要构建
+        run: python3 -B -m unittest discover -s tools -p 'test_ci*.py'
+      - name: 选择相关检查
         id: filter
         run: python3 tools/ci-changes.py
 
   rust:
     name: Rust (windows-latest)
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -67,22 +50,11 @@ jobs:
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
         run: cargo test --locked -p mpider-core -p article-md -p mpider-tauri
-      - uses: actions/setup-python@v7.1.0
-        if: runner.os == 'Windows'
-        with:
-          python-version: "3.12"
-      - name: Windows 原生协议离线测试
-        shell: pwsh
-        if: runner.os == 'Windows'
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install -r native/requirements.txt
-          python -B -m unittest discover -s native -p 'test_*.py'
 
   frontend:
     name: Frontend
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -96,12 +68,56 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc --noEmit -p frontend/tsconfig.json
       - run: pnpm build
+      - name: 界面契约与更新发行回归
+        run: pnpm test:frontend
+
+  native:
+    name: Native (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 9
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - name: 安装原生测试依赖
+        run: python -m pip install -r native/requirements.txt
       - name: 原生桥协议离线测试
-        run: |
-          python -m pip install -r native/requirements.txt
-          python -m unittest discover -s native -p 'test_*.py'
-      - name: 界面契约与原生桥回归
-        run: pnpm test
+        run: python -B -m unittest discover -s native -p 'test_*.py'
+      - name: 原生观察与列表过滤回归
+        run: pnpm test:native
+
+  ci:
+    name: CI configuration
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: 路径判断与汇总检查回归
+        run: python3 -B -m unittest discover -s tools -p 'test_ci*.py'
+      - name: 核验 workflow 语法与任务依赖
+        uses: docker://rhysd/actionlint:1.7.12
+
+  result:
+    name: CI
+    if: always()
+    needs: [changes, frontend, rust, native, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: 确认所需检查均已通过
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 -B tools/check-ci-results.py
