@@ -46,4 +46,4 @@ draft: true
 
 `.github/workflows/pages.yml` 在网站 PR 中运行类型检查、构建和产物验证；相关变更合并到 `main` 后自动发布到 GitHub Pages，也可手动触发。PR 不会部署到正式网站。
 
-FAQ 存放在 `src/data/faqs.json`，第一条为“为什么开源？”，默认展开。可见答案和 FAQ 结构化数据使用同一份内容。
+FAQ 存放在 `src/config/faqs.json`，第一条为“为什么开源？”，默认展开。可见答案和 FAQ 结构化数据使用同一份内容。
