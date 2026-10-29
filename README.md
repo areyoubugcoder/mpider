@@ -11,7 +11,7 @@
 >
 > **未开源的客户端，请谨慎使用；宣称开源，也要警惕“假开源”。** 如果只公开界面或外围代码，却不公开核心采集逻辑，仍以“开源客户端”让用户相信采集行为可被核查，就属于这里所说的“假开源”。尤其需要核查凭证如何获取、保存、使用，以及是否上传云端。**有公开仓库，不等于核心逻辑已公开，更不等于下载的安装包与源码一致或使用安全。**
 
-[下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/4uEpUqA9P13) · [进群交流](https://qm.qq.com/q/s4JavFxA3e)
+[项目官网](https://areyoubugcoder.github.io/mpider/) · [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/8c23uHExcT6) · [进群交流](https://qm.qq.com/q/s4JavFxA3e)
 
 > **v1.0.0 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 

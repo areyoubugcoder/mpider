@@ -1,0 +1,46 @@
+---
+import { render, type CollectionEntry } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { publishedPosts } from '../../lib/posts';
+import { sitePath, siteUrl, formatDate } from '../../lib/site';
+
+export async function getStaticPaths() {
+  return (await publishedPosts()).map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+interface Props { post: CollectionEntry<'blog'> }
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+const schema = [{
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.pubDate.toISOString(),
+  dateModified: (post.data.updatedDate ?? post.data.pubDate).toISOString(),
+  mainEntityOfPage: siteUrl(`blog/${post.id}/`),
+  author: { '@type': 'Organization', name: 'MPider', url: siteUrl() },
+  publisher: { '@type': 'Organization', name: 'MPider', url: siteUrl() },
+  inLanguage: 'zh-CN',
+}];
+---
+<BaseLayout title={`${post.data.title}｜MPider`} description={post.data.description} article schema={schema}>
+  <main class="reading-page" id="main-content">
+    <nav class="breadcrumbs" aria-label="当前位置"><a href={sitePath()}>首页</a><span aria-hidden="true"> / </span><a href={sitePath('blog/')}>使用指南</a></nav>
+    <article>
+      <header class="article-header">
+        <p class="reading-eyebrow">MPider / 使用指南</p>
+        <h1>{post.data.title}</h1>
+        <p class="article-meta"><time datetime={post.data.pubDate.toISOString()}>{formatDate(post.data.pubDate)}</time> · MPider</p>
+        <p class="reading-intro">{post.data.description}</p>
+      </header>
+      {headings.length > 1 && (
+        <nav class="article-toc" aria-label="文章目录">
+          <p>本文内容</p>
+          <ul>{headings.filter((heading) => heading.depth === 2).map((heading) => <li><a href={`#${heading.slug}`}>{heading.text}</a></li>)}</ul>
+        </nav>
+      )}
+      <div class="prose"><Content /></div>
+    </article>
+    <aside class="article-next"><h2>自己动手，先把使用边界看清。</h2><p>MPider 免费开源，支持本地保存正文与图片。使用个人微信会话仍有账号风险。</p><a href={`${sitePath()}#mpider-risk-faq`}>了解 MPider 与使用风险 →</a></aside>
+    <a class="back-link" href={sitePath('blog/')}>← 更多使用指南</a>
+  </main>
+</BaseLayout>

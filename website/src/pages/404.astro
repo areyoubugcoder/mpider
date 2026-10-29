@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { sitePath } from '../lib/site';
+---
+<BaseLayout title="页面不存在｜MPider" description="这个页面不存在或已移动。返回 MPider 首页，查看使用方法与风险说明。" noindex canonicalPath={sitePath('404.html')}>
+  <main class="reading-page" id="main-content"><p class="reading-eyebrow">404</p><h1>这个页面还没留下来。</h1><p class="reading-intro">地址可能已变更，回首页看看吧。</p><a class="back-link" href={sitePath()}>← 返回首页</a></main>
+</BaseLayout>

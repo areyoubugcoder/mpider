@@ -38,6 +38,12 @@ class CiChangesTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assert_checks([path], "frontend")
 
+    def test_website_uses_its_independent_workflow(self):
+        self.assert_checks(["website/src/pages/index.astro", "website/pnpm-lock.yaml",
+                            "website/src/content/blog/guide.md"])
+        self.assert_checks([".github/workflows/pages.yml"], "ci")
+        self.assert_checks(["website/src/pages/index.astro", "frontend/src/App.tsx"], "frontend")
+
     def test_markdown_imported_by_frontend_is_checked(self):
         root = Path(__file__).resolve().parent.parent
         imports = []
