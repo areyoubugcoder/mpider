@@ -4,10 +4,15 @@
   "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@10.29.2",
-  "engines": { "node": ">=24", "pnpm": ">=10" },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10"
+  },
   "scripts": {
     "dev": "astro dev --host 127.0.0.1 --port 3000",
     "build": "astro build",
+    "build:cloudflare": "node tools/build-cloudflare.mjs",
+    "deploy:cloudflare": "wrangler deploy",
     "check": "astro check",
     "verify": "node tools/verify-build.mjs",
     "preview": "astro preview --host 127.0.0.1 --port 3000"
@@ -19,6 +24,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "wrangler": "4.155.0"
   }
 }

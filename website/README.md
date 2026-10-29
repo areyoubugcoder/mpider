@@ -46,4 +46,23 @@ draft: true
 
 `.github/workflows/pages.yml` 在网站 PR 中运行类型检查、构建和产物验证；相关变更合并到 `main` 后自动发布到 GitHub Pages，也可手动触发。PR 不会部署到正式网站。
 
+## Cloudflare Workers 发布
+
+同一份 Astro 源码也支持 Workers Static Assets，独立域名为 `https://mpider.followto.us/`，无需服务端适配器。
+
+在 `website` 目录运行：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm exec wrangler login
+pnpm deploy:cloudflare --dry-run
+pnpm deploy:cloudflare
+```
+
+Wrangler 会先执行 `build:cloudflare`，固定使用上述域名运行类型检查、构建和产物验证，任何一步失败都会终止发布。也可单独运行 `pnpm build:cloudflare` 检查产物。每次部署都会重新生成 `dist`，不会复用 GitHub Pages 的子路径产物。
+
+`wrangler.jsonc` 管理 Worker 名称、自定义域名与静态文件路由；目录页统一使用末尾 `/`，不存在的地址返回自定义 404 页和 HTTP 404。Cloudflare 会为自定义域名管理 DNS 与 HTTPS 证书。部署账户须拥有 `followto.us` 的管理权限；多账户环境可通过 `CLOUDFLARE_ACCOUNT_ID` 选择部署账户，凭证不写入仓库。
+
+本地发布使用 Wrangler 登录凭证。若接入持续部署，应使用单独的部署 API token，并在 CI 的 secret 中保存 `CLOUDFLARE_API_TOKEN`；不要复制本地 OAuth 登录文件。
+
 FAQ 存放在 `src/config/faqs.json`，第一条为“为什么开源？”，默认展开。可见答案和 FAQ 结构化数据使用同一份内容。
