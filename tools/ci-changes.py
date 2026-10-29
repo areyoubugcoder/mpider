@@ -22,7 +22,7 @@ NON_BUILD_FILES = {
 
 NON_BUILD_PREFIXES = (
     "docs/",
-    # 官网由独立 Pages workflow 构建与校验，不触发桌面客户端构建。
+    # 官网由独立网站 workflow 构建与校验，不触发桌面客户端构建。
     "website/",
     ".github/ISSUE_TEMPLATE/",
     # 当前 CI 不启动这些本地模拟，也不构建移动端。
@@ -34,6 +34,7 @@ NON_BUILD_PREFIXES = (
 
 CI_FILES = {
     ".github/workflows/pages.yml",
+    ".github/workflows/cloudflare.yml",
     "tools/ci-changes.py", "tools/test_ci_changes.py",
     "tools/check-ci-results.py", "tools/test_ci_results.py",
 }
