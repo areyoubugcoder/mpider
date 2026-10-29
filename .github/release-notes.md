@@ -1,38 +1,9 @@
-## MPider v1.0.0 · Windows 原生采集工作台
+## MPider v1.0.1
 
-本版采用 Windows 原生列表与会话协议采集，公众号监测、列表采集和正文下载分别控制。仅适配微信 **4.1.15.56 x64**，本版为正式开源发行。
+- 公众号列表固定提供「导出所有文章」，导出该号全部已入库文章及已保存图片，同时生成 Markdown 和 HTML。
+- 缺正文时显示未下载篇数，并提供下载入口。
+- 底栏新增导出进度，切页后保留；完成或失败后隐藏，无任务时不显示。
 
-### 本版变化
+Windows x64：推荐使用 `MPider_1.0.1_x64-setup.exe`，也提供中文 MSI 和完整便携 ZIP。
 
-- 公众号监测登记名称、会话与游标；每个公众号分别同步最新文章，或按篇数 / 截止日期采集历史。
-- 首页、历史和正文任务分标签管理，支持暂停与检查点续采；新会话到齐后继续原任务。
-- 正文与图片进入统一下载队列，支持离线阅读，同时导出 Markdown、HTML、双格式索引和已保存图片。
-- 新增公众号文章筛选、确认删除、请求预算与日志排查，以及默认隐藏的游标实验室。
-- Windows 安装版支持从 GitHub 检查正式版本、预下载并验证签名，确认后安装与重启。
-- 重写 README，更新本版演示截图，移除旧采集方案操作文档。
-
-### 下载选择
-
-| 附件 | 说明 |
-| --- | --- |
-| `MPider_1.0.0_x64-setup.exe` | 推荐的 NSIS 安装版 |
-| `MPider_1.0.0_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v1.0.0-windows-x64.zip` | 完整便携包，解压后运行 `MPider.exe`，保留 `runtime/` |
-| `latest.json` / `*.sig` | 客户端更新清单与更新签名 |
-| `SHA256SUMS` / `verification.json` | 文件摘要与便携包离线自检记录 |
-
-客户端包附带 Python 3.12.10、Frida 17.23.3、cryptography 50.0.2 与第三方许可，无需安装开发环境。另需 Windows 10/11 x64、WebView2 和已登录的适配微信。首次登记和更新会话需要解锁且可交互的桌面。
-
-升级前备份系统设置显示的完整数据目录。便携版迁移到安装版后使用应用内更新；预发布版本不进入稳定更新通道。更新签名不等同于 Windows 开发者代码签名，系统可能提示未知发布者。
-
-### 使用与验证范围
-
-开启公众号监测后，在微信手动打开目标主页；随后在公众号行发起首页同步或历史采集，再单独下载正文。程序不替你操作微信窗口，不要求根证书或系统代理。
-
-本版发布流程在 Windows 检查前端类型、Rust 格式与 Clippy，运行 Rust / Python / Node 离线回归，构建便携包并重新解压验证文件摘要、Python 依赖和虚构材料 AES-GCM / DPAPI 往返，再构建 NSIS / MSI 与签名更新清单。`verification.json` 记录包内源码 revision；Release 附件的 `SHA256SUMS` 对应本次产物。
-
-发行准备已在 Windows 通过 0.2.0 → 0.2.1 的真实 GitHub 更新检查、下载安装包、版本绑定验签、安装和自动重启，并核对文章正文、配置及归档内容保持不变。没有开启微信监测或新增采集请求；安装升级验证不代表真实采集或长期稳定性通过。具体版本的产物与实际验收结果以本 Release 附件和说明为准。
-
-Frida 附加曾导致微信退出；会话可能过期，微信可能要求验证或限制账号。默认间隔、并发与预算只是本地节制配置，不保证免封控。当前仅验证微信 4.1.15.56 x64，指纹不匹配时停止。只采集你有权获取和保存的内容。
-
-[开始使用](https://github.com/areyoubugcoder/mpider#开始采集) · [更新记录](https://github.com/areyoubugcoder/mpider/blob/main/CHANGELOG.md) · [问题反馈](https://github.com/areyoubugcoder/mpider/issues/new/choose)
+[更新记录](https://github.com/areyoubugcoder/mpider/blob/main/CHANGELOG.md)
