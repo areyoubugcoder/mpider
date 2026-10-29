@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { publishedPosts } from '../../lib/posts';
+import { sitePath, formatDate } from '../../lib/site';
+const posts = await publishedPosts();
+---
+<BaseLayout title="使用指南与文章整理方法｜MPider" description="了解公众号文章如何保存到本机、Markdown 与 HTML 导出的使用场景，以及使用个人微信账号前需要了解的风险。">
+  <main class="reading-page" id="main-content">
+    <a class="back-link" href={sitePath()}>← 返回首页</a>
+    <p class="reading-eyebrow">MPider / 使用指南</p>
+    <h1>让好内容，留得更明白。</h1>
+    <p class="reading-intro">从本地留存，到阅读与整理。也把使用前需要了解的风险说清楚。</p>
+    <div class="post-list">
+      {posts.map((post) => (
+        <article>
+          <time datetime={post.data.pubDate.toISOString()}>{formatDate(post.data.pubDate)}</time>
+          <h2><a href={sitePath(`blog/${post.id}/`)}>{post.data.title}</a></h2>
+          <p>{post.data.description}</p>
+          <a class="read-article" href={sitePath(`blog/${post.id}/`)}>阅读全文 ↗</a>
+        </article>
+      ))}
+    </div>
+  </main>
+</BaseLayout>

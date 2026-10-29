@@ -1,0 +1,34 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import faqs from '../data/faqs.json';
+import { product, siteUrl, plainText } from '../lib/site';
+
+const schema = [
+  { '@type': 'SoftwareApplication', name: product.name, url: siteUrl(), applicationCategory: 'UtilitiesApplication', operatingSystem: 'Windows', downloadUrl: product.download, license: `${product.repository}/blob/main/LICENSE`, description: product.description, offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' } },
+  { '@type': 'FAQPage', mainEntity: faqs.map((faq) => ({ '@type': 'Question', name: faq.question, acceptedAnswer: { '@type': 'Answer', text: plainText(faq.answerHtml) } })) },
+];
+---
+<BaseLayout schema={schema}>
+  <main id="main-content">
+
+      <section class="kp-hero" aria-labelledby="mpider-hero-title">
+        <div class="kp-final">
+          <p class="kp-kicker"><strong>免费开源</strong></p>
+          <h1 id="mpider-hero-title">公众号批量下载<br><span>现在，自己来。</span></h1>
+          <p class="kp-description">保存正文与图片，留在自己的电脑里。<br>想留下的好内容，自己动手。</p>
+          <nav class="kp-links" aria-label="开始使用 MPider">
+            <a class="kp-link kp-link-main" href={product.community} target="_blank" rel="noopener noreferrer" aria-label="加入 QQ 交流群：南山必胜客">加群交流 <span aria-hidden="true">↗</span></a>
+            <a class="kp-link" href={product.download} target="_blank" rel="noopener noreferrer">下载 Windows 版 <span aria-hidden="true">↓</span></a>
+            <a class="kp-link" href={product.demo} target="_blank" rel="noopener noreferrer">观看演示视频 <span aria-hidden="true">↗</span></a>
+          </nav>
+          <p class="kp-source"><a href={product.repository} target="_blank" rel="noopener noreferrer">开源项目地址 ↗</a></p>
+        </div>
+      </section>
+      <section class="kp-faq" id="mpider-risk-faq" aria-labelledby="mpider-faq-title">
+        <p class="kp-faq-label">FAQ / 风险与透明</p>
+        <h2 id="mpider-faq-title">使用之前，先了解这些。</h2>
+        {faqs.map((faq) => (<details open><summary>{faq.question}</summary><div class="kp-answer" set:html={faq.answerHtml} /></details>))}
+
+      </section>
+  </main>
+</BaseLayout>

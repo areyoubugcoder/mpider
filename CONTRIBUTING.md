@@ -40,6 +40,8 @@ pnpm test
 | 改动范围 | 执行的检查 |
 | --- | --- |
 | 公开说明、截图、协作模板、`.gitignore`、本地 Postman 模拟、未使用的移动端图标 | 轻量路径判断与汇总，不运行应用构建 |
+| 官网源码与文章（`website/`） | 独立 Pages workflow 运行网站类型检查、静态构建与产物验证，不构建桌面客户端 |
+| Pages workflow 配置 | 网站检查与 workflow 静态检查 |
 | 前端源码、广告默认配置、编入界面的 Markdown（含 `CHANGELOG.md`） | 前端类型、构建及界面回归 |
 | Rust 实现、Windows 图标、Rust 测试样本 | Windows Rust 格式、Clippy 与测试 |
 | 原生工作进程及指纹 | Rust 检查，以及 Linux/Windows Python 与原生观察脚本回归 |
