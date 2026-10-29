@@ -57,7 +57,7 @@
   @media (prefers-reduced-motion:reduce) { #mpider-landing .kp-link { transition: none; } }
 
 /* 网站共用的阅读布局；桌面客户端样式与构建保持独立。 */
-html { color-scheme: light dark; min-width: 320px; }
+html { color-scheme: light dark; }
 body { margin: 0; background: light-dark(#f7f6ed, #171a15); }
 #mpider-landing .kp-logo { color: var(--kp-ink); text-decoration: none; }
 #mpider-landing summary { cursor: pointer; }
