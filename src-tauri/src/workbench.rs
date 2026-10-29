@@ -138,6 +138,7 @@ pub async fn workbench_export_source(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     biz: String,
+    on_progress: tauri::ipc::Channel<core::markdown_export::ExportProgress>,
 ) -> Result<Option<core::markdown_export::MarkdownExport>, String> {
     pick_markdown_export(
         window,
@@ -145,6 +146,7 @@ pub async fn workbench_export_source(
         root(&state)?,
         Some(biz),
         Vec::new(),
+        on_progress,
     )
     .await
 }
@@ -153,6 +155,7 @@ pub async fn workbench_export_articles(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     article_ids: Vec<i64>,
+    on_progress: tauri::ipc::Channel<core::markdown_export::ExportProgress>,
 ) -> Result<Option<core::markdown_export::MarkdownExport>, String> {
     pick_markdown_export(
         window,
@@ -160,6 +163,7 @@ pub async fn workbench_export_articles(
         root(&state)?,
         None,
         article_ids,
+        on_progress,
     )
     .await
 }
@@ -169,20 +173,29 @@ async fn pick_markdown_export(
     root: PathBuf,
     biz: Option<String>,
     ids: Vec<i64>,
+    on_progress: tauri::ipc::Channel<core::markdown_export::ExportProgress>,
 ) -> Result<Option<core::markdown_export::MarkdownExport>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         core::markdown_export::validate_selection(&store, biz.as_deref(), &ids)
             .map_err(|e| e.to_string())?;
         let selected = rfd::FileDialog::new()
             .set_parent(&window)
-            .set_title("选择 Markdown 导出文件夹")
+            .set_title("选择文章导出文件夹（Markdown 和 HTML）")
             .pick_folder();
         let Some(path) = selected else {
             return Ok(None);
         };
+        let report = |progress| {
+            // 窗口关闭或进度接收失败不影响本地文件导出。
+            let _ = on_progress.send(progress);
+        };
         match biz {
-            Some(biz) => core::markdown_export::export_source(&store, &root, &biz, &path),
-            None => core::markdown_export::export_articles(&store, &root, &ids, &path),
+            Some(biz) => core::markdown_export::export_source_with_progress(
+                &store, &root, &biz, &path, &report,
+            ),
+            None => core::markdown_export::export_articles_with_progress(
+                &store, &root, &ids, &path, &report,
+            ),
         }
         .map(Some)
         .map_err(|e| e.to_string())

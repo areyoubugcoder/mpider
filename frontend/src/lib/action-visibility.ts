@@ -1,4 +1,4 @@
-/** 操作列状态规则：每类任务仅给出一个主操作，正文未齐时不展示导出。 */
+/** 操作列状态规则：每类任务仅给出一个主操作，正文全部齐备后才允许执行整号导出。 */
 import { needsSessionRecovery, recoveryIsWaiting } from "./home-sync.ts";
 import type { Source, Task } from "./workbench.ts";
 

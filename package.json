@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "pnpm test:frontend && pnpm test:native",
-    "test:frontend": "node --test tools/test_cursor_lab.ts tools/test_home_sync.ts tools/test_pagination.ts tools/test_relative_time.ts tools/test_advertisements.ts tools/test_action_visibility.ts tools/test_release_updater.mjs",
+    "test:frontend": "node --test tools/test_cursor_lab.ts tools/test_home_sync.ts tools/test_pagination.ts tools/test_relative_time.ts tools/test_advertisements.ts tools/test_action_visibility.ts tools/test_export_progress.ts tools/test_release_updater.mjs",
     "test:native": "node --test tools/test_native_bridge_filter.mjs tools/test_session_agent.mjs"
   },
   "dependencies": {

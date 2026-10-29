@@ -28,7 +28,7 @@ test("下载结束仍缺正文或图片时提供重试；完整下载与取消�
   assert.equal(taskPrimaryAction({ ...partial, state: "cancelled" }), null);
   assert.equal(taskPrimaryAction({ ...partial, progress: task().progress }), null);
 });
-test("整号仅在全部非空正文齐备时导出；缺正文只显示下载，未知状态不猜测", () => {
+test("整号仅在全部非空正文齐备时允许导出；缺正文提供下载，未知状态不猜测", () => {
   assert.equal(sourceBodyAction(10, 0), "download");
   assert.equal(sourceBodyAction(10, 9), "download");
   assert.equal(sourceBodyAction(10, 10), "export");

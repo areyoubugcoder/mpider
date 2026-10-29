@@ -1,5 +1,6 @@
 /** 工作台 IPC 契约：游标原值、会话密钥及保护文件路径不返回到前端。 */
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import { articleExportProgress, type ArticleExportProgress } from "./export-progress.ts";
 export interface Policy {
   version: number; list_min_ms: number; list_max_ms: number; list_daily_budget: number;
   body_gap_ms: number; image_gap_ms: number; body_workers: number; image_workers: number;
@@ -73,7 +74,14 @@ export const sourceCounts = () => invoke<Record<string, number>>("workbench_sour
 export interface DownloadReceipt { task_id: number | null; requested: number; queued: number; already_downloaded: number; already_queued: number }
 export const downloadSourceBodies = (biz: string) => invoke<DownloadReceipt>("workbench_archive_source", { biz });
 export interface MarkdownExport { directory: string; total: number; with_body: number; missing_body: number; partial_images: number }
-export const exportSourceArticles = (biz: string) => invoke<MarkdownExport | null>("workbench_export_source", { biz });
+function exportWithProgress(selection: { biz: string } | { articleIds: number[] }) {
+  return articleExportProgress.run(onProgress => {
+    const channel = new Channel<ArticleExportProgress>(onProgress);
+    const command = "biz" in selection ? "workbench_export_source" : "workbench_export_articles";
+    return invoke<MarkdownExport | null>(command, { ...selection, onProgress: channel });
+  });
+}
+export const exportSourceArticles = (biz: string) => exportWithProgress({ biz });
 export const taskAction = (id: number, action: "resume" | "pause" | "cancel") => invoke<void>("workbench_task_action", { id, action });
 export const createExperiment = (cursorId: number, scheduleHours: number[], sessionId: string | null = null) => invoke<number>("workbench_experiment", { cursorId, scheduleHours, sessionId });
 export const cancelExperiment = (id: number) => invoke<void>("workbench_experiment_cancel", { id });
@@ -88,7 +96,7 @@ export const startHomeSync = () => invoke<number>("workbench_home_sync_start", {
 export const recoverSession = (id: number) => invoke<void>("workbench_recover_session", { id, pythonPath: pythonPath() });
 
 export const downloadArticles = (articleIds: number[]) => invoke<DownloadReceipt>("workbench_download_articles", { articleIds });
-export const exportArticles = (articleIds: number[]) => invoke<MarkdownExport | null>("workbench_export_articles", { articleIds });
+export const exportArticles = (articleIds: number[]) => exportWithProgress({ articleIds });
 export const deleteArticles = (articleIds: number[]) => invoke<number>("workbench_delete_articles", { articleIds });
 export interface SourceDeletion { deleted_articles: number; cancelled_tasks: number; cancelled_experiments: number; cleanup_pending: number }
 export const deleteSource = (biz: string) => invoke<SourceDeletion>("workbench_delete_source", { biz });
