@@ -15,6 +15,12 @@ pub struct MarkdownExport {
     pub missing_body: usize,
     pub partial_images: usize,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ExportProgress {
+    pub completed: usize,
+    pub total: usize,
+}
 struct Staging(PathBuf);
 impl Drop for Staging {
     fn drop(&mut self) {
@@ -155,9 +161,19 @@ pub fn export_source(
     biz: &str,
     destination: &Path,
 ) -> Result<MarkdownExport> {
+    export_source_with_progress(store, root, biz, destination, &|_| {})
+}
+
+pub fn export_source_with_progress(
+    store: &Store,
+    root: &Path,
+    biz: &str,
+    destination: &Path,
+    on_progress: &dyn Fn(ExportProgress),
+) -> Result<MarkdownExport> {
     validate_selection(store, Some(biz), &[])?;
     let articles = store.list_articles(Some(biz), -1, 0, false)?;
-    export_rows(store, root, articles, Some(biz), destination)
+    export_rows(store, root, articles, Some(biz), destination, on_progress)
 }
 
 pub fn export_articles(
@@ -165,6 +181,16 @@ pub fn export_articles(
     root: &Path,
     ids: &[i64],
     destination: &Path,
+) -> Result<MarkdownExport> {
+    export_articles_with_progress(store, root, ids, destination, &|_| {})
+}
+
+pub fn export_articles_with_progress(
+    store: &Store,
+    root: &Path,
+    ids: &[i64],
+    destination: &Path,
+    on_progress: &dyn Fn(ExportProgress),
 ) -> Result<MarkdownExport> {
     validate_selection(store, None, ids)?;
     let ids: std::collections::BTreeSet<i64> = ids.iter().copied().collect();
@@ -178,7 +204,7 @@ pub fn export_articles(
         ensure!(article.is_deleted == 0, "文章已删除或不存在");
         articles.push(article);
     }
-    export_rows(store, root, articles, None, destination)
+    export_rows(store, root, articles, None, destination, on_progress)
 }
 fn export_rows(
     store: &Store,
@@ -186,6 +212,7 @@ fn export_rows(
     articles: Vec<ArticleRow>,
     biz: Option<&str>,
     destination: &Path,
+    on_progress: &dyn Fn(ExportProgress),
 ) -> Result<MarkdownExport> {
     ensure!(destination.is_absolute(), "请选择绝对路径的导出目录");
     let destination = destination.canonicalize().context("导出目录不存在")?;
@@ -226,6 +253,10 @@ fn export_rows(
         missing_body: 0,
         partial_images: 0,
     };
+    on_progress(ExportProgress {
+        completed: 0,
+        total: result.total,
+    });
     let nickname = match biz {
         Some(biz) => source_name(store, biz)?,
         None => "所选文章".into(),
@@ -365,6 +396,10 @@ fn export_rows(
             }
         ));
         manifest.push(json!({"article_id":row.id,"biz":row.biz,"nickname":article_nickname,"title":row.title,"author":row.author,"published_at":row.published_at,"source_url":url,"state":state,"missing_images":missing_images,"markdown":format!("articles/{}/article.md",row.id),"html":format!("articles/{}/article.html",row.id)}));
+        on_progress(ExportProgress {
+            completed: result.with_body,
+            total: result.total,
+        });
     }
     html_index.push_str("</ul>");
     super::archive::atomic_write(
@@ -452,7 +487,41 @@ mod tests {
                 )
                 .unwrap();
         }
-        let first = export_source(&store, &root.join("workbench"), "FAKE", &output).unwrap();
+        let progress = std::cell::RefCell::new(Vec::new());
+        let first = export_source_with_progress(
+            &store,
+            &root.join("workbench"),
+            "FAKE",
+            &output,
+            &|update| {
+                // 上报的每一篇均已写出两种格式，尚未完成时不提前发布导出目录。
+                let stage = std::fs::read_dir(&output)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .find(|path| path.to_string_lossy().ends_with(".tmp"))
+                    .unwrap();
+                let written = std::fs::read_dir(stage.join("articles"))
+                    .into_iter()
+                    .flatten()
+                    .filter(|entry| {
+                        let path = entry.as_ref().unwrap().path();
+                        path.join("article.md").is_file() && path.join("article.html").is_file()
+                    })
+                    .count();
+                assert_eq!(written, update.completed);
+                progress.borrow_mut().push(update);
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            *progress.borrow(),
+            (0..=76)
+                .map(|completed| ExportProgress {
+                    completed,
+                    total: 76
+                })
+                .collect::<Vec<_>>()
+        );
         assert_eq!(first.total, 76);
         assert_eq!(first.with_body, 76);
         assert_eq!(first.missing_body, 0);
@@ -589,7 +658,14 @@ fn selected_export_deduplicates_cross_source_ids_and_rejects_deleted_rows_before
     std::fs::create_dir_all(&root).unwrap();
     let before = std::fs::read_dir(&root).unwrap().count();
     assert!(validate_selection(&store, None, &[a, b]).is_err());
-    assert!(export_articles(&store, &root.join("workbench"), &[a, b], &root).is_err());
+    assert!(export_articles_with_progress(
+        &store,
+        &root.join("workbench"),
+        &[a, b],
+        &root,
+        &|_| panic!("正文校验失败时不应开始导出或上报进度"),
+    )
+    .is_err());
     assert_eq!(std::fs::read_dir(&root).unwrap().count(), before);
     store
         .upsert_article(
@@ -602,7 +678,24 @@ fn selected_export_deduplicates_cross_source_ids_and_rejects_deleted_rows_before
             },
         )
         .unwrap();
-    let result = export_articles(&store, &root.join("workbench"), &[a, b, a], &root).unwrap();
+    let progress = std::cell::RefCell::new(Vec::new());
+    let result = export_articles_with_progress(
+        &store,
+        &root.join("workbench"),
+        &[a, b, a],
+        &root,
+        &|update| progress.borrow_mut().push(update),
+    )
+    .unwrap();
+    assert_eq!(
+        *progress.borrow(),
+        (0..=2)
+            .map(|completed| ExportProgress {
+                completed,
+                total: 2
+            })
+            .collect::<Vec<_>>()
+    );
     assert_eq!(result.total, 2);
     assert_eq!(result.with_body, 2);
     assert_eq!(result.missing_body, 0);

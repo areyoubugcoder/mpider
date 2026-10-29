@@ -106,10 +106,16 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
               <p className="text-sm font-medium">下载全部正文</p><p className="mt-2 text-sm text-muted-foreground">获取本地已经入库的文章正文。</p><p className="mt-2 text-xs text-muted-foreground">共 {articleCount ?? 0} 篇，已下载的文章自动跳过。正文、封面和图片随首次下载保存，队列进度见窗口底部，可在任务页暂停或继续。之后新增文章可再次下载。</p>
               <PopoverClose asChild><Button className="mt-4" size="sm" disabled={busy} onClick={() => run(async () => { showDownloadReceipt(await downloadSourceBodies(s.biz)); })}>开始下载</Button></PopoverClose>
             </PopoverContent></Popover>}
-            {bodyAction === "export" && <Popover><PopoverTrigger asChild><TextAction disabled={busy}>导出全部文章</TextAction></PopoverTrigger><PopoverContent aria-label={`导出${s.nickname}全部文章`}>
-              <p className="text-sm font-medium">导出 Markdown 和 HTML</p><p className="mt-2 text-sm text-muted-foreground">导出本地已入库的全部 {articleCount ?? 0} 篇文章及已保存图片。</p><p className="mt-2 text-xs text-muted-foreground">需先下载该公众号全部已入库文章的正文；有未下载正文时，请先完成下载再导出。</p>
-              <PopoverClose asChild><Button className="mt-4" size="sm" disabled={busy} onClick={() => run(async () => showExportResult(await exportSourceArticles(s.biz)))}>选择导出路径</Button></PopoverClose>
-            </PopoverContent></Popover>}
+            <Popover><PopoverTrigger asChild><TextAction disabled={busy}>导出所有文章</TextAction></PopoverTrigger><PopoverContent aria-label={`导出${s.nickname}所有文章`}>
+              <p className="text-sm font-medium">导出所有文章</p><p className="mt-2 text-sm text-muted-foreground">导出该公众号本地已入库的全部 {articleCount} 篇文章，包含所有分页。同时生成 Markdown 和 HTML，并附带已保存的图片。</p>
+              {bodyAction !== null && <p className="mt-2 text-xs text-muted-foreground">已下载正文 {s.body_count} / {articleCount} 篇。</p>}
+              {bodyAction === "download" && <p role="status" className="mt-2 text-xs text-warning">还有 {articleCount - s.body_count} 篇正文未下载，请先下载，完成后再导出。</p>}
+              {bodyAction === null && <p role="status" className="mt-2 text-xs text-muted-foreground">{articleCount === 0 ? "暂无可导出的文章，请先同步最新文章或采集历史文章。" : "暂时无法确认正文下载状态，请稍后重试。"}</p>}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {bodyAction === "download" && <PopoverClose asChild><Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showDownloadReceipt(await downloadSourceBodies(s.biz)))}>下载未完成正文</Button></PopoverClose>}
+                <PopoverClose asChild><Button size="sm" disabled={busy || bodyAction !== "export"} onClick={() => run(async () => showExportResult(await exportSourceArticles(s.biz)))}>选择导出路径</Button></PopoverClose>
+              </div>
+            </PopoverContent></Popover>
             <TaskMoreActions tasks={[{task:home,label:"取消首页同步"},{task:history,label:"取消历史采集"}]} busy={busy} run={run}><DropdownMenuItem className="text-destructive focus:text-destructive" disabled={busy} onSelect={() => setDeletingSource({biz:s.biz,nickname:s.nickname,article_count:s.article_count})}>删除公众号</DropdownMenuItem></TaskMoreActions>
           </div></TableCell>
         </TableRow>;

@@ -5,6 +5,7 @@ import { QueueProgressTrigger } from "@/components/QueueProgressTrigger";
 import { laboratoryVisible, saveLaboratoryVisible } from "@/lib/ui-settings";
 import { toast } from "sonner";
 import { DownloadQueueBar } from "@/components/DownloadQueueBar";
+import { ExportQueueBar } from "@/components/ExportQueueBar";
 import { ProjectLinks } from "@/components/ProjectLinks";
 import { UpdateProvider, UpdateIndicator } from "@/components/AppUpdater";
 import { AboutDialog } from "@/components/AboutDialog";
@@ -52,6 +53,7 @@ export function App() {
     <footer className="flex h-10 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
       <ProjectLinks />
       <div className="ml-auto flex min-w-0 items-center gap-2"><UpdateIndicator onOpen={() => setView("settings")} /><DownloadQueueBar snapshot={snapshot.data} onTasks={() => { setTaskKind("archive");setView("jobs"); }} />
+      <ExportQueueBar />
       {!!snapshot.data?.active_queues?.history.task_count && <QueueProgressTrigger queue={snapshot.data.active_queues.history} label="历史采集" hint="点击查看历史采集任务" onClick={()=>{setTaskKind("history");setView("jobs");}} />}</div>
       <HomeSyncStatus snapshot={snapshot.data} />
     </footer><AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} version={health.data?.app_version || bundledVersion} /><Toaster />

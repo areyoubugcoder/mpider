@@ -2,16 +2,16 @@
 
 当前发行目标为 Windows 10/11 x64 原生工作台。首次登记公众号和更新会话需要已登录、解锁且可交互的微信桌面；保存有效会话后的历史翻页、正文和图片任务仍需电脑与应用运行，但不依赖持续点击微信窗口。不提供无人登录的 Windows 服务或自动唤醒。
 
-v1.0.0 包含独立监测、按公众号任务、Markdown/HTML 双格式导出和 GitHub 签名更新。下载时请核对 Release 的源码版本、文件摘要与验证范围；离线 CI 不代替真实采集与安装升级验证。
+v1.0.1 包含独立监测、按公众号任务、Markdown/HTML 双格式导出和 GitHub 签名更新。下载时请核对 Release 的源码版本、文件摘要与验证范围；离线 CI 不代替真实采集与安装升级验证。
 
 ## 使用发行包
 
-推荐安装 `MPider_1.0.0_x64-setup.exe`，也可选择 MSI；安装版携带与便携包相同的 Python 环境和许可，并支持应用内签名更新。以下步骤介绍便携 ZIP 的使用。
+推荐安装 `MPider_1.0.1_x64-setup.exe`，也可选择 MSI；安装版携带与便携包相同的 Python 环境和许可，并支持应用内签名更新。以下步骤介绍便携 ZIP 的使用。
 
 1. 从 [GitHub Releases](https://github.com/areyoubugcoder/mpider/releases) 下载 `MPider-v版本-windows-x64.zip` 和 `SHA256SUMS`，核对来源及摘要：
 
    ```powershell
-   Get-FileHash .\MPider-v1.0.0-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MPider-v1.0.1-windows-x64.zip -Algorithm SHA256
    ```
 
 2. **完整解压**到可写目录，保留 `MPider.exe` 旁的 `runtime`。不要只复制 EXE。发行包附带 Python 3.12.10、Frida 17.23.3、cryptography 50.0.2 及其依赖，无需安装 Node.js、pnpm、Rust 或系统 Python。
@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Rel
 
 `Bypass` 仅作用于当前 PowerShell 进程，不修改机器策略。脚本遵循已有 `CARGO_TARGET_DIR`，运行 `pnpm tauri build --no-bundle`，把前端与已内嵌的 native worker、JS 和 profiles 编译到 EXE，再附带隔离 Python/Frida 环境，产物位于：
 
-- `dist-windows/MPider-v1.0.0-windows-x64.zip`：完整便携包。
+- `dist-windows/MPider-v1.0.1-windows-x64.zip`：完整便携包。
 - `dist-windows/SHA256SUMS`：ZIP 的 SHA-256。
 - `dist-windows/verification.json`：离线验收记录。
 
@@ -57,7 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Rel
 `release-manifest.json` 列出包内文件摘要、源码 revision 与依赖版本。独立验证命令为：
 
 ```powershell
-python tools/verify-windows-release.py --directory dist-windows\MPider-v1.0.0-windows-x64
+python tools/verify-windows-release.py --directory dist-windows\MPider-v1.0.1-windows-x64
 ```
 
 该检查只核对文件完整性、x64 PE、实际 Python/依赖版本以及虚构材料 AES-GCM 和当前用户 DPAPI 往返，不启动微信、不读取真实会话、不发送采集请求。**离线检查成功不代表真实采集或长期稳定性通过。**页面交互验收需在交互桌面另行进行，真实数据不得进入公开包。
