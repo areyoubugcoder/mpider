@@ -249,7 +249,9 @@ pub fn discover(data: &[u8]) -> Vec<Link> {
     // 两种对齐均检查；非 ASCII 单元插入分隔符，禁止跨字符串拼接。
     for offset in [0, 1] {
         let ascii: Vec<u8> = data[offset.min(data.len())..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|p| if p[1] == 0 && p[0] < 128 { p[0] } else { 0 })
             .collect();
         scan(&ascii);
