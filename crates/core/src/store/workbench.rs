@@ -1842,6 +1842,11 @@ impl Store {
             .conn()
             .query_row("SELECT cover FROM articles WHERE id=?", [id], |r| r.get(0))?)
     }
+    pub fn wb_article_sn(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT sn FROM articles WHERE id=?", [id], |r| r.get(0))?)
+    }
     pub fn wb_cached_html(&self, id: i64) -> Result<Option<String>> {
         Ok(self
             .conn()

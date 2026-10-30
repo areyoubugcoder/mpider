@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{account}}</title>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+body{margin:0;background:#f6f6f6;color:#222;font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.wrap{max-width:860px;margin:0 auto;background:#fff;padding:28px 20px 48px;min-height:100vh}
+h1{font-size:22px;margin:0 0 6px}
+.sum{color:#777;font-size:14px;margin-bottom:16px}
+input{width:100%;padding:9px 12px;font-size:15px;border:1px solid #ddd;border-radius:8px;margin-bottom:12px;background:transparent;color:inherit}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;gap:12px;align-items:baseline;padding:9px 2px;border-bottom:1px solid #f0f0f0}
+.d{color:#999;font-variant-numeric:tabular-nums;flex:none;font-size:13px}
+.ti{flex:1;min-width:0}
+.ti a{color:#1a1a1a;text-decoration:none}
+.ti a:hover{color:#576b95;text-decoration:underline}
+.ops{flex:none}
+.small{font-size:12px;color:#999;text-decoration:none;margin-left:6px}
+.dim{color:#999}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;background:#eef1f6;color:#576b95;margin-left:4px}
+.tag.warn{background:#fff4e5;color:#b26a00}
+.tag.err{background:#fdecec;color:#c62828}
+.foot{margin-top:28px;color:#aaa;font-size:12px;line-height:1.7}
+@media (prefers-color-scheme:dark){body{background:#111;color:#ddd}.wrap{background:#1b1b1b}li{border-color:#2a2a2a}.ti a{color:#ddd}input{border-color:#333}}
+@media (max-width:560px){li{flex-wrap:wrap;gap:2px 10px}.ti{flex-basis:100%;order:2}.d{order:1}.ops{order:1;margin-left:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>{{account}}</h1>
+<div class="sum">{{summary}}</div>
+<input id="q" type="search" placeholder="搜索标题…" autocomplete="off">
+<ul id="list">
+{{rows}}
+</ul>
+<div class="foot">生成于 {{generated}}。每篇文章有 HTML 和 Markdown 两种格式，在 articles/ 目录；图片在 images/ 目录。<br>{{disclaimer}}</div>
+</div>
+<script>
+(function(){var q=document.getElementById('q'),li=[].slice.call(document.querySelectorAll('#list li'));
+q.addEventListener('input',function(){var v=q.value.trim().toLowerCase();li.forEach(function(x){x.style.display=!v||x.getAttribute('data-k').indexOf(v)>=0?'':'none';});});})();
+</script>
+</body>
+</html>
