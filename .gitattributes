@@ -1,0 +1,2 @@
+# 随仓库固定的第三方许可全文按 SHA-256 校验，Windows 检出不能转换换行。
+tools/licenses/** -text

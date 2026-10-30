@@ -46,7 +46,7 @@ SOFTWARE.
 | cffi | 2.0.0 | `runtime/session-deps/cffi-2.0.0.dist-info/licenses/`（LICENSE、AUTHORS） | [PyPI](https://pypi.org/project/cffi/2.0.0/) |
 | pycparser | 2.23 | `runtime/session-deps/pycparser-2.23.dist-info/LICENSE` | [PyPI](https://pypi.org/project/pycparser/2.23/) |
 
-应用未修改这些运行环境组件。Frida 的 wxWindows 例外文本引用的 LGPL 全文从 [GNU 官方许可档案](https://www.gnu.org/licenses/old-licenses/lgpl-2.0.txt) 获取并固定摘要。微信与 Microsoft WebView2 不在便携包中再分发。
+应用未修改这些运行环境组件。Frida 的 wxWindows 例外文本引用的 LGPL 全文取自 [GNU 官方许可档案](https://www.gnu.org/licenses/old-licenses/lgpl-2.0.txt)，原样保存在 `tools/licenses/Frida-COPYING.LIB` 并固定摘要，组装时不再联网获取。微信与 Microsoft WebView2 不在便携包中再分发。
 
 ## Rust、界面与字体依赖
 
