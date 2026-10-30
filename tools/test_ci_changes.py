@@ -42,6 +42,7 @@ class CiChangesTests(unittest.TestCase):
         self.assert_checks(["website/src/pages/index.astro", "website/pnpm-lock.yaml",
                             "website/src/content/blog/guide.md"])
         self.assert_checks([".github/workflows/pages.yml"], "ci")
+        self.assert_checks([".github/workflows/cloudflare.yml"], "ci")
         self.assert_checks(["website/src/pages/index.astro", "frontend/src/App.tsx"], "frontend")
 
     def test_markdown_imported_by_frontend_is_checked(self):
