@@ -75,28 +75,37 @@ def verify_pe(executable):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--exe", type=Path, required=True)
+    parser.add_argument("--exe", type=Path)
+    parser.add_argument("--prefetch", action="store_true", help="只下载并校验锁定的运行环境，在长构建前暴露网络问题")
     parser.add_argument("--output", type=Path, default=ROOT / "dist-windows")
     parser.add_argument("--revision", default="source-archive")
     args = parser.parse_args()
-    verify_pe(args.exe)
+    if not args.prefetch:
+        if args.exe is None:
+            parser.error("组装便携包需要 --exe")
+        verify_pe(args.exe)
     version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
     lock = json.loads((ROOT / "tools/windows-runtime.lock.json").read_text(encoding="utf-8"))
+    requirements = (ROOT / "native/requirements.txt").read_text(encoding="utf-8").splitlines()
     for item in lock["packages"]:
-        if item["name"] in ("frida", "cryptography"):
-            requirement = f"{item['name']}=={item['version']}"
-            if requirement not in (ROOT / "native/requirements.txt").read_text(encoding="utf-8").splitlines():
-                raise ValueError(f"运行依赖与锁定包不一致：{requirement}")
+        requirement = f"{item['name']}=={item['version']}"
+        if requirement not in requirements:
+            raise ValueError(f"运行依赖与锁定包不一致：{requirement}")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    cache = output / ".downloads"
+    cache.mkdir(exist_ok=True)
+    if args.prefetch:
+        for item in (lock["python"], *lock["packages"]):
+            download(item, cache)
+        print(f"运行环境已就绪：{cache}")
+        return
     package_name = f"MPider-v{version}-windows-x64"
     stage = output / package_name
     if stage.exists():
         shutil.rmtree(stage)
     runtime = stage / "runtime"
     runtime.mkdir(parents=True)
-    cache = output / ".downloads"
-    cache.mkdir(exist_ok=True)
     extract(download(lock["python"], cache), runtime)
     # ._pth 维持嵌入式隔离；加入发行包内的依赖，忽略全局 Python/site-packages。
     (runtime / "python312._pth").write_text("python312.zip\n.\nsession-deps\n", encoding="utf-8")

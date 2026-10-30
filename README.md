@@ -174,7 +174,7 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 
 ## 开发与贡献
 
-开发需要 Node.js **24+**、**pnpm**、Rust stable；Windows 构建还需 Visual Studio C++ Build Tools 与 Windows SDK。改动在独立 Git worktree 中进行：
+开发需要 Node.js **24+**、**pnpm**、Rust（版本见 `rust-toolchain.toml`）；Windows 构建还需 Visual Studio C++ Build Tools 与 Windows SDK。改动在独立 Git worktree 中进行：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -187,7 +187,7 @@ cargo test --locked -p mpider-core -p article-md -p mpider-tauri
 pnpm tauri dev
 ```
 
-Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。日常 CI 在 PR 中按改动路径选择前端、Windows Rust、原生桥或 CI 配置检查，合并到 main 后不重复执行；纯公开资料只运行轻量路径判断与汇总，编入界面的更新记录、FAQ、实验室与请求策略文档仅触发前端检查。共享契约改动联动验证，手动触发可运行全部检查，详细规则见[贡献指南](CONTRIBUTING.md)。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
+Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。日常 CI 在 PR 中按改动路径选择前端、Windows Rust、原生桥或 CI 配置检查，合并到 main 后按相同规则运行并刷新 Rust 缓存；纯公开资料只运行轻量路径判断与汇总，编入界面的更新记录、FAQ、实验室与请求策略文档仅触发前端检查。共享契约改动联动验证，手动触发可运行全部检查，详细规则见[贡献指南](CONTRIBUTING.md)。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
 
 [贡献指南](CONTRIBUTING.md) · [实现原理](docs/how-it-works.md) · [更新记录](CHANGELOG.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 

@@ -1,7 +1,10 @@
 name: CI
 
+# PR 只读 Rust 缓存；main 推送负责写入，供后续 PR 和发行复用。
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -16,6 +19,7 @@ jobs:
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       rust: ${{ steps.filter.outputs.rust }}
@@ -36,16 +40,18 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装 rust-toolchain.toml 固定的工具链
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: test
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
@@ -56,11 +62,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.1.0
-        with:
-          version: 9
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
@@ -80,14 +85,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - uses: pnpm/action-setup@v6.1.0
-        with:
-          version: 9
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
@@ -103,6 +107,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7.0.1
       - name: 路径判断与汇总检查回归
@@ -115,6 +120,7 @@ jobs:
     if: always()
     needs: [changes, frontend, rust, native, ci]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7.0.1
       - name: 确认所需检查均已通过

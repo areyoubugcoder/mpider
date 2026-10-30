@@ -1,3 +1,5 @@
-# 原生桥与会话协议的已验证依赖；不安装 frida-tools。
+# 原生桥与会话协议的已验证依赖，与 tools/windows-runtime.lock.json 保持一致；不安装 frida-tools。
 frida==17.23.3
 cryptography==50.0.2
+cffi==2.0.0
+pycparser==2.23

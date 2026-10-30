@@ -24,7 +24,7 @@ v1.0.2 包含独立监测、按公众号任务、Markdown/HTML 双格式导出�
 
 ## 从源码构建
 
-构建环境：Windows x64、Visual Studio 2022 Build Tools（C++ 桌面开发及 Windows SDK）、Rust stable MSVC、Node.js 24+、pnpm 9+；组装完整发行包还需构建机 Python 3.9+。包管理器只使用 pnpm。
+构建环境：Windows x64、Visual Studio 2022 Build Tools（C++ 桌面开发及 Windows SDK）、Rust MSVC（版本见 `rust-toolchain.toml`）、Node.js 24+、pnpm（版本见 `package.json`）；组装完整发行包还需构建机 Python 3.9+。包管理器只使用 pnpm。
 
 在独立 Git worktree 中执行：
 
@@ -62,7 +62,7 @@ python tools/verify-windows-release.py --directory dist-windows\MPider-v1.0.2-wi
 
 该检查只核对文件完整性、x64 PE、实际 Python/依赖版本以及虚构材料 AES-GCM 和当前用户 DPAPI 往返，不启动微信、不读取真实会话、不发送采集请求。**离线检查成功不代表真实采集或长期稳定性通过。**页面交互验收需在交互桌面另行进行，真实数据不得进入公开包。
 
-`.github/workflows/release.yml` 在 Windows 执行类型、Rust、Python、Node 离线检查后构建，并重新解压 ZIP 验证。手动触发只留存 Actions artifact；`v*` 标签必须与应用版本一致，只创建预发布草稿，核验后再公开。当前流程不发布 macOS 安装包，避免将旧代理工作流支持误认为新原生工作台支持。
+`.github/workflows/release.yml` 先下载并校验全部锁定依赖，再在 Windows 执行类型、Rust、Python、Node 离线检查后构建，并重新解压 ZIP 验证。手动触发只留存 Actions artifact；`v*` 标签必须与应用版本一致，只创建预发布草稿，核验后再公开。当前流程不发布 macOS 安装包，避免将旧代理工作流支持误认为新原生工作台支持。
 
 ## 数据与异常
 

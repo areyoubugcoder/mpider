@@ -46,7 +46,7 @@ pnpm tauri signer generate -w ~/.tauri/mpider-updater.key
 
 1. 核对发布提交与标签；本次项目版本为 `1.0.2`，标签应为 `v1.0.2`。保留历史 Release 与标签，不覆盖仍在服务用户的版本。
 2. 按项目主线/开源发布流程准备发布提交。需要升级版本时，同时修改三个版本文件及锁文件；本功能不会自行修改项目版本。
-3. 将匹配当前项目版本的 `v*` 标签推送到 GitHub。工作流先核对版本与签名配置，再为 Windows x64 构建；缺少签名配置时标签发布立即失败。
+3. 打标签前在 main 手动运行 Release（`gh workflow run release.yml --ref main`）预演完整构建。预演只留存 artifact，不创建 Release，并写入后续标签可读取的 Rust 缓存。通过后将匹配当前项目版本的 `v*` 标签推送到 GitHub。工作流先核对版本与签名配置，再为 Windows x64 构建；缺少签名配置时标签发布立即失败。
 4. Windows 构建成功后整理附件并生成 `latest.json`，创建 Release **预发布草稿**；保留完整便携 ZIP、自检与摘要，同时提供携带相同 Python 运行环境和完整许可证的 NSIS/MSI。Windows 更新默认使用 NSIS `-setup.exe`；MSI 仍提供手动安装。工作流不构建或上传 macOS 产物。
 5. 检查产物、签名、Windows 清单并补充发布说明，再公开草稿。验收通过后发布为正式版本（取消预发布标记），客户端才会通过 latest 地址检测到该版本；保持预发布标记时不会被稳定更新通道选中。缺包、缺签名或缺平台时不生成可发布清单。
 
