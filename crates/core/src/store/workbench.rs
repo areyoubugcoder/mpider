@@ -1666,7 +1666,11 @@ impl Store {
             super::system_logs::write(
                 &tx,
                 request_module(&event),
-                if outcome == "ok" { "info" } else { "warn" },
+                if ["ok", "redirect"].contains(&outcome) {
+                    "info"
+                } else {
+                    "warn"
+                },
                 "请求已完成，业务页面是否入库以页面保存记录为准",
                 context,
             )?;

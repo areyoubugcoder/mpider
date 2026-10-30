@@ -20,6 +20,7 @@ export const pushOutcome = (value: string) => ({
   pending: "等待处理", fetching: "正在解析", imported: "新增入库", existing: "文章已存在", ignored: "已过滤",
   verification_required: "网页要求验证", rate_limited: "请求受限", http_error: "网页请求失败",
   network_error: "网络异常", invalid_metadata: "文章信息不完整", unavailable: "文章不可用",
+  redirect_pending: "等待跳转解析", redirect_rejected: "跳转目标不是可校验的文章", redirect_limit: "跳转次数已达上限",
 }[value] || value);
 export function pushPhase(run?: PushRun) {
   if (!run) return "读取中";

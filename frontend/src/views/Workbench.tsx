@@ -29,6 +29,7 @@ import { logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage,
 
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 const names: Record<string, string> = {
+  redirect: "文章链接跳转",
   push_metadata: "推送文章解析", invalid_metadata: "文章信息不完整", rate_limited: "请求受限",
   starting: "正在准备", stopping: "正在停止", stopped: "已停止", observed: "已观察", observed_home: "用户原生列表",
   recovering: "正在恢复", queued: "排队中", running: "运行中", paused: "已暂停", needs_action: "待人工处理", done: "已结束", cancelled: "已取消", failed: "失败",
@@ -221,7 +222,7 @@ export function WorkbenchRate() {
   const listing=useQuery({queryKey:["request-page",category,page,pageSize],queryFn:()=>requestPage(category,Date.now()/1000-86400,pageSize,page*pageSize),refetchInterval:2000});
   const filtered=listing.data?.items||[];useServerPage(listing.data?.total,pageSize,page,setPage);
   return <Page title="限流配置" description="按实际发送时间分析请求频率与失败证据。策略可调整，实验、对照、重建和重试均纳入记账。">
-    <div className="grid gap-4 md:grid-cols-3">{[["近24小时列表请求", data?.list_calls_24h ?? 0], ["展示样本失败/异常", requests.filter(r => !["ok", "pending"].includes(r.outcome)).length], ["当前策略版本", data?.policy.version ?? "—"]].map(([k, v]) => <Card key={k}><CardContent className="pt-5"><p className="text-xs text-muted-foreground">{k}</p><p className="mt-2 text-2xl font-semibold">{v}</p></CardContent></Card>)}</div>
+    <div className="grid gap-4 md:grid-cols-3">{[["近24小时列表请求", data?.list_calls_24h ?? 0], ["展示样本失败/异常", requests.filter(r => !["ok", "pending", "redirect"].includes(r.outcome)).length], ["当前策略版本", data?.policy.version ?? "—"]].map(([k, v]) => <Card key={k}><CardContent className="pt-5"><p className="text-xs text-muted-foreground">{k}</p><p className="mt-2 text-2xl font-semibold">{v}</p></CardContent></Card>)}</div>
     {data && <Panel title="抓取频率与预算" description="正文和图片各自统一限制发送间隔，增加 worker 不会绕过间隔。"><PolicyForm key={data.policy.version} policy={data.policy} /></Panel>}
     <Panel title="实际请求明细" description="按近24小时完整请求账本分页；导出包含全部已保存请求。原生请求与其镜像日志只计算一次。">
       <div className="flex flex-wrap justify-between gap-2"><select aria-label="筛选请求类别" className={selectClass} value={category} onChange={e => {setCategory(e.target.value);setPage(0);}}><option value="">全部请求</option>{["list", "body", "image"].map(c => <option key={c} value={c}>{label(c)}</option>)}</select><Button variant="outline" disabled={busy} onClick={() => run(async () => revealInFolder(await exportRequests()))}>导出请求记录</Button></div>

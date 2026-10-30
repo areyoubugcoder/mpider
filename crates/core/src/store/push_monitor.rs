@@ -194,7 +194,7 @@ impl Store {
         if !run.active || run.id != id || ts < run.next_fetch_at {
             return Ok(None);
         }
-        Ok(conn.query_row("SELECT id,url,attempts,first_seen_at FROM push_candidates WHERE state='pending' AND retry_at<=? ORDER BY (attempts=0) DESC,first_seen_at DESC,id DESC LIMIT 1",[ts],|r|Ok(Candidate{id:r.get(0)?,url:r.get(1)?,attempts:r.get(2)?,first_seen_at:r.get(3)?})).optional()?)
+        Ok(conn.query_row("SELECT id,url,attempts,first_seen_at,key FROM push_candidates WHERE state='pending' AND retry_at<=? ORDER BY COALESCE(reason='redirect_pending',0) DESC,(attempts=0) DESC,first_seen_at DESC,id DESC LIMIT 1",[ts],|r|Ok(Candidate{id:r.get(0)?,url:r.get(1)?,attempts:r.get(2)?,first_seen_at:r.get(3)?,key:r.get(4)?})).optional()?)
     }
     pub fn push_claim(&self, id: i64, candidate: i64) -> Result<bool> {
         let mut conn = self.conn();
@@ -254,6 +254,34 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+    /// 不自动跟随 HTTP 跳转：保存后重新经过统一请求闸门，每跳都占额度。
+    pub fn push_redirect(&self, id: i64, candidate: i64, url: &str) -> Result<()> {
+        let target =
+            crate::workbench::push_monitor::normalize(url).context("跳转目标不是有效的微信文章")?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        if !active(&tx, id)? {
+            return Ok(());
+        }
+        let attempts: u32 = tx.query_row(
+            "SELECT attempts FROM push_candidates WHERE id=? AND state='fetching'",
+            [candidate],
+            |r| r.get(0),
+        )?;
+        if attempts >= 3 {
+            terminal(
+                &tx,
+                candidate,
+                "redirect_limit",
+                Some("redirect_limit"),
+                now(),
+            )?;
+        } else {
+            tx.execute("UPDATE push_candidates SET state='pending',url=?,reason='redirect_pending',retry_at=0,finished_at=NULL WHERE id=?",params![target.url,candidate])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
     pub fn push_import(&self, id: i64, candidate: i64, meta: &Metadata, ts: f64) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -261,11 +289,15 @@ impl Store {
             return Ok(());
         }
         let run = run_from(&tx)?;
-        let first: f64 = tx.query_row(
-            "SELECT first_seen_at FROM push_candidates WHERE id=? AND state='fetching'",
+        let (first, key): (f64, String) = tx.query_row(
+            "SELECT first_seen_at,key FROM push_candidates WHERE id=? AND state='fetching'",
             [candidate],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
+        ensure!(
+            !key.starts_with("article:") || key == meta.key(),
+            "跳转后的文章身份不一致"
+        );
         tx.execute(
             "UPDATE push_candidates SET biz=?,nickname=?,title=?,published_at=? WHERE id=?",
             params![

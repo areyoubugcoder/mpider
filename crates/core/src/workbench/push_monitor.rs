@@ -111,6 +111,7 @@ pub struct Link {
 #[derive(Debug)]
 pub struct Candidate {
     pub id: i64,
+    pub key: String,
     pub url: String,
     pub attempts: u32,
     pub first_seen_at: f64,
@@ -272,6 +273,38 @@ pub struct Metadata {
     pub digest: Option<String>,
     pub cover: Option<String>,
 }
+impl Metadata {
+    pub fn key(&self) -> String {
+        format!("article:{}:{}:{}", self.biz, self.mid, self.idx)
+    }
+}
+
+fn redirect_target(current: &Link, location: &str) -> Option<Link> {
+    if location.len() > 2048 {
+        return None;
+    }
+    let target = url::Url::parse(&current.url).ok()?.join(location).ok()?;
+    let next = normalize(target.as_str())?;
+    if current.biz.is_some() && next.biz.is_some() && current.key != next.key {
+        return None;
+    }
+    Some(next)
+}
+
+fn verification_redirect(current: &Link, location: &str) -> bool {
+    let Ok(base) = url::Url::parse(&current.url) else {
+        return false;
+    };
+    let Ok(target) = base.join(location) else {
+        return false;
+    };
+    let path = target.path().to_ascii_lowercase();
+    target.host_str() == Some("mp.weixin.qq.com")
+        && path.starts_with("/mp/")
+        && ["captcha", "verify", "secitpt"]
+            .iter()
+            .any(|part| path.contains(part))
+}
 
 pub fn metadata(link: &Link, html: &str) -> Result<Metadata> {
     let real_body = ["js_content", "js_text_desc", "picture_page_info_list"]
@@ -376,11 +409,26 @@ fn client() -> Result<reqwest::Client> {
         .redirect(reqwest::redirect::Policy::none()).build()?)
 }
 
-async fn fetch(client: &reqwest::Client, url: &str) -> Result<(u16, String)> {
+struct HttpPage {
+    status: u16,
+    html: String,
+    location: Option<String>,
+}
+
+async fn fetch(client: &reqwest::Client, url: &str) -> Result<HttpPage> {
     let mut response = client.get(url).send().await?;
     let status = response.status().as_u16();
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     if !(200..300).contains(&status) {
-        return Ok((status, String::new()));
+        return Ok(HttpPage {
+            status,
+            html: String::new(),
+            location,
+        });
     }
     ensure!(
         response
@@ -393,7 +441,11 @@ async fn fetch(client: &reqwest::Client, url: &str) -> Result<(u16, String)> {
         ensure!(bytes.len() + chunk.len() <= MAX_HTML, "网页超过大小上限");
         bytes.extend_from_slice(&chunk);
     }
-    Ok((status, String::from_utf8(bytes).context("网页不是 UTF-8")?))
+    Ok(HttpPage {
+        status,
+        html: String::from_utf8(bytes).context("网页不是 UTF-8")?,
+        location,
+    })
 }
 
 /// 显式开启后才运行；桌面启动只将旧运行置为停止，保留队列和预算。
@@ -498,13 +550,46 @@ async fn process_at(
             }
         }
     };
+    if let Ok(page) = &result {
+        if [301, 302, 303, 307, 308].contains(&page.status) {
+            let verification = page
+                .location
+                .as_deref()
+                .is_some_and(|location| verification_redirect(&link, location));
+            let next = page
+                .location
+                .as_deref()
+                .and_then(|location| redirect_target(&link, location));
+            store.wb_request_finish(&request_id,if verification {"verification_required"}else if next.is_some() {"redirect"}else{"http_error"},serde_json::json!({"http_status":page.status,"candidate_id":candidate.id,"redirect_accepted":next.is_some(),"verification_redirect":verification}),now())?;
+            if verification {
+                store.wb_cooldown(now() + 7200.)?;
+                store.push_result(
+                    id,
+                    candidate.id,
+                    "verification_required",
+                    true,
+                    now() + 7200.,
+                )?;
+            } else if let Some(next) = next {
+                store.push_redirect(id, candidate.id, &next.url)?;
+            } else {
+                store.push_result(id, candidate.id, "redirect_rejected", false, 0.)?;
+            }
+            return Ok(());
+        }
+    }
     let (outcome, meta, retry, cooldown, status) = match result {
-        Ok((429, _)) => ("rate_limited", None, true, true, Some(429)),
-        Ok((code, _)) if !(200..300).contains(&code) => {
+        Ok(HttpPage { status: 429, .. }) => ("rate_limited", None, true, true, Some(429)),
+        Ok(HttpPage { status: code, .. }) if !(200..300).contains(&code) => {
             ("http_error", None, code >= 500, false, Some(code))
         }
-        Ok((code, html)) => match metadata(&link, &html) {
-            Ok(meta) => ("ok", Some(meta), false, false, Some(code)),
+        Ok(HttpPage {
+            status: code, html, ..
+        }) => match metadata(&link, &html) {
+            Ok(meta) if !candidate.key.starts_with("article:") || candidate.key == meta.key() => {
+                ("ok", Some(meta), false, false, Some(code))
+            }
+            Ok(_) => ("invalid_metadata", None, true, false, Some(code)),
             Err(e) if e.to_string() == "verification_required" => {
                 ("verification_required", None, true, true, Some(code))
             }
@@ -518,7 +603,7 @@ async fn process_at(
     store.wb_request_finish(
         &request_id,
         outcome,
-        serde_json::json!({"http_status":status}),
+        serde_json::json!({"http_status":status,"candidate_id":candidate.id}),
         now(),
     )?;
     if cooldown {

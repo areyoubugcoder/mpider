@@ -85,6 +85,10 @@ fn detects_ascii_utf16_xml_and_escaped_links_without_bare_path_noise() {
 
 #[test]
 fn webpage_identity_and_risk_are_validated() {
+    assert!(!verification_redirect(
+        &link("FAKE_A"),
+        "/s/verify1234567890123456"
+    ));
     let good = metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap();
     assert_eq!(good.idx, 2);
     assert!(metadata(&link("FAKE_A"), &html("FAKE_B")).is_err());
@@ -272,18 +276,239 @@ fn hourly_budget_survives_runs_and_body_gap_is_shared() {
 }
 
 async fn fixture(code: u16, body: String) -> (String, tokio::task::JoinHandle<String>) {
+    fixture_with_location(code, body, None).await
+}
+async fn fixture_with_location(
+    code: u16,
+    body: String,
+    location: Option<String>,
+) -> (String, tokio::task::JoinHandle<String>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut request = vec![0u8; 8192];
         let n = socket.read(&mut request).await.unwrap();
-        let head=format!("HTTP/1.1 {code} Test\r\nContent-Length: {}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n",body.len());
+        let location = location
+            .map(|value| format!("Location: {value}\r\n"))
+            .unwrap_or_default();
+        let head=format!("HTTP/1.1 {code} Test\r\nContent-Length: {}\r\nContent-Type: text/html; charset=utf-8\r\n{location}Connection: close\r\n\r\n",body.len());
         socket.write_all(head.as_bytes()).await.unwrap();
         socket.write_all(body.as_bytes()).await.unwrap();
         String::from_utf8_lossy(&request[..n]).into_owned()
     });
     (format!("http://{address}/s"), task)
+}
+
+#[tokio::test]
+async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
+    let (store, id, candidate_id) = setup(Config::default());
+    no_gap(&store);
+    let (endpoint, server) = fixture_with_location(
+        302,
+        String::new(),
+        Some(format!("{}&key=discard-me", link("FAKE_A").url)),
+    )
+    .await;
+    process_at(
+        &store,
+        &client().unwrap(),
+        id,
+        store.push_next(id, now()).unwrap().unwrap(),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![link("FAKE_B")],
+                ..Default::default()
+            },
+            now() + 1.,
+        )
+        .unwrap();
+    let next = store.push_next(id, now() + 2.).unwrap().unwrap();
+    assert_eq!(next.id, candidate_id);
+    assert!(!next.url.contains("key="));
+    let (endpoint, server) = fixture(200, html("FAKE_A")).await;
+    process_at(&store, &client().unwrap(), id, next, &endpoint)
+        .await
+        .unwrap();
+    server.await.unwrap();
+    assert_eq!(store.push_status().unwrap().requests_hour, 2);
+    assert_eq!(store.push_status().unwrap().imported, 1);
+    assert!(store
+        .wb_snapshot()
+        .unwrap()
+        .requests
+        .iter()
+        .any(|r| r.outcome == "redirect"));
+}
+
+#[tokio::test]
+async fn redirect_waits_for_hourly_budget_after_reopen_without_hidden_http() {
+    let (store, id, _) = setup(Config {
+        hourly_budget: 1,
+        ..Default::default()
+    });
+    no_gap(&store);
+    let (endpoint, server) =
+        fixture_with_location(302, String::new(), Some(link("FAKE_A").url)).await;
+    process_at(
+        &store,
+        &client().unwrap(),
+        id,
+        store.push_next(id, now()).unwrap().unwrap(),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    store.push_restart().unwrap();
+    let next_run = store
+        .push_start(Config {
+            hourly_budget: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    let candidate = store.push_next(next_run, now()).unwrap().unwrap();
+    process_at(
+        &store,
+        &client().unwrap(),
+        next_run,
+        candidate,
+        "http://127.0.0.1:1/not-sent",
+    )
+    .await
+    .unwrap();
+    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(store.push_status().unwrap().pending, 1);
+    assert!(store.push_run().unwrap().next_fetch_at > now() + 3500.);
+}
+
+#[tokio::test]
+async fn redirect_to_other_domain_or_other_known_article_never_gets_followed() {
+    for target in [
+        "https://example.invalid/s/1234567890123456789012".into(),
+        link("FAKE_B").url,
+    ] {
+        let (store, id, _) = setup(Config::default());
+        no_gap(&store);
+        let (endpoint, server) = fixture_with_location(302, String::new(), Some(target)).await;
+        process_at(
+            &store,
+            &client().unwrap(),
+            id,
+            store.push_next(id, now()).unwrap().unwrap(),
+            &endpoint,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(store.push_status().unwrap().requests_hour, 1);
+        assert!(store.push_next(id, now()).unwrap().is_none());
+        assert_eq!(
+            store.push_status().unwrap().events[0].outcome,
+            "redirect_rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn redirect_loop_stops_after_three_counted_requests() {
+    let (store, id, _) = setup(Config::default());
+    no_gap(&store);
+    for _ in 0..3 {
+        let (endpoint, server) =
+            fixture_with_location(302, String::new(), Some(link("FAKE_A").url)).await;
+        process_at(
+            &store,
+            &client().unwrap(),
+            id,
+            store.push_next(id, now()).unwrap().unwrap(),
+            &endpoint,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
+    assert_eq!(store.push_status().unwrap().requests_hour, 3);
+    assert_eq!(
+        store.push_status().unwrap().events[0].outcome,
+        "redirect_limit"
+    );
+    assert!(store.push_next(id, now()).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn short_redirect_cannot_replace_original_full_article_identity() {
+    let (store, id, _) = setup(Config::default());
+    no_gap(&store);
+    let (endpoint, server) = fixture_with_location(
+        302,
+        String::new(),
+        Some("https://mp.weixin.qq.com/s/1234567890123456789012".into()),
+    )
+    .await;
+    process_at(
+        &store,
+        &client().unwrap(),
+        id,
+        store.push_next(id, now()).unwrap().unwrap(),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    let (endpoint, server) = fixture(200, html("FAKE_B")).await;
+    process_at(
+        &store,
+        &client().unwrap(),
+        id,
+        store.push_next(id, now()).unwrap().unwrap(),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    assert!(store.list_accounts().unwrap().is_empty());
+    assert_eq!(
+        store.push_status().unwrap().events[0].reason.as_deref(),
+        Some("invalid_metadata")
+    );
+}
+
+#[tokio::test]
+async fn verification_redirect_is_not_followed_and_enters_cooldown() {
+    let (store, id, _) = setup(Config::default());
+    no_gap(&store);
+    let (endpoint, server) = fixture_with_location(
+        302,
+        String::new(),
+        Some("https://mp.weixin.qq.com/mp/verify?token=synthetic".into()),
+    )
+    .await;
+    process_at(
+        &store,
+        &client().unwrap(),
+        id,
+        store.push_next(id, now()).unwrap().unwrap(),
+        &endpoint,
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(
+        store.push_status().unwrap().events[0].reason.as_deref(),
+        Some("verification_required")
+    );
+    assert!(store.wb_policy().unwrap().cooldown_until > now() + 7100.);
+    assert!(store.push_next(id, now()).unwrap().is_none());
 }
 
 #[tokio::test]
