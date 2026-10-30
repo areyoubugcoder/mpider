@@ -157,10 +157,26 @@ impl Store {
                 )
                 .optional()?;
             if let Some(candidate) = known {
-                let improved: bool = tx.query_row("SELECT instr(url,'chksm=')=0 AND instr(?,'chksm=')>0 FROM push_candidates WHERE id=?",params![link.url,candidate],|r|r.get(0))?;
+                let (improved,state): (bool,String) = tx.query_row("SELECT instr(url,'chksm=')=0 AND instr(?,'chksm=')>0,state FROM push_candidates WHERE id=?",params![link.url,candidate],|r|Ok((r.get(0)?,r.get(1)?)))?;
                 if improved {
+                    if remaining == 0
+                        && [
+                            "http_error",
+                            "verification_required",
+                            "invalid_metadata",
+                            "network_error",
+                            "redirect_rejected",
+                        ]
+                        .contains(&state.as_str())
+                    {
+                        // 留待队列有空位时再次补签，避免已完成候选重排突破上限。
+                        continue;
+                    }
                     // 同一文章补齐签名后重排失败候选；既有入库结果和已发送次数保留。
-                    tx.execute("UPDATE push_candidates SET url=?,state='pending',reason='link_updated',retry_at=0,finished_at=NULL WHERE id=? AND attempts<3 AND state IN ('pending','http_error','verification_required','invalid_metadata','network_error','redirect_rejected')",params![link.url,candidate])?;
+                    let changed=tx.execute("UPDATE push_candidates SET url=?,state='pending',reason='link_updated',retry_at=0,finished_at=NULL WHERE id=? AND attempts<3 AND state IN ('pending','http_error','verification_required','invalid_metadata','network_error','redirect_rejected')",params![link.url,candidate])?;
+                    if changed > 0 && state != "pending" {
+                        remaining = remaining.saturating_sub(1);
+                    }
                     tx.execute(
                         "UPDATE push_candidates SET url=? WHERE id=?",
                         params![link.url, candidate],
