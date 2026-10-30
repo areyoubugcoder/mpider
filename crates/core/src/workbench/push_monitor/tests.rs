@@ -340,3 +340,113 @@ async fn stop_during_http_does_not_commit_late_reply() {
     assert_eq!(requests[0].owner_kind, "push_monitor");
     assert_eq!(json!(store.push_status().unwrap())["run"]["active"], false);
 }
+
+#[test]
+fn persisted_queue_and_request_budget_survive_database_reopen() {
+    let path = std::env::temp_dir().join(format!(
+        "mpider-push-reopen-{}-{}.db",
+        std::process::id(),
+        (now() * 1000000.) as u64
+    ));
+    {
+        let store = Store::open(&path).unwrap();
+        let id = store
+            .push_start(Config {
+                hourly_budget: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .push_scanned(
+                id,
+                Scan {
+                    links: vec![link("FAKE_A")],
+                    ..Default::default()
+                },
+                now(),
+            )
+            .unwrap();
+        let candidate = store.push_next(id, now()).unwrap().unwrap();
+        store
+            .wb_request_permit("body", PURPOSE, id, "FAKE_A", now())
+            .unwrap();
+        store.push_claim(id, candidate.id).unwrap();
+    }
+    {
+        let store = Store::open(&path).unwrap();
+        store.push_restart().unwrap();
+        assert!(!store.push_status().unwrap().run.active);
+        let id = store
+            .push_start(Config {
+                hourly_budget: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(store.push_next(id, now()).unwrap().unwrap().attempts, 1);
+        assert!(store
+            .wb_request_permit("body", PURPOSE, id, "FAKE_A", now())
+            .unwrap()
+            .request_id
+            .is_none());
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn fresh_candidates_take_priority_over_backlog_and_retrying_links() {
+    let (store, id, old) = setup(Config::default());
+    store.push_claim(id, old).unwrap();
+    store
+        .push_result(id, old, "network_error", true, 0.)
+        .unwrap();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![link("FAKE_B")],
+                ..Default::default()
+            },
+            now() + 1.,
+        )
+        .unwrap();
+    assert_ne!(store.push_next(id, now() + 2.).unwrap().unwrap().id, old);
+}
+
+#[tokio::test]
+async fn scanner_stop_is_cooperative_and_partial_results_are_discarded() {
+    struct WaitingScanner(Arc<AtomicBool>);
+    impl Scanner for WaitingScanner {
+        fn scan(&mut self, cancel: &AtomicBool) -> Result<Scan> {
+            self.0.store(true, Ordering::Relaxed);
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(Scan {
+                links: vec![link("FAKE_A")],
+                ..Default::default()
+            })
+        }
+    }
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let id = store.push_start(Config::default()).unwrap();
+    let entered = Arc::new(AtomicBool::new(false));
+    let task = tokio::spawn(run_with_scanner(
+        store.clone(),
+        id,
+        WaitingScanner(entered.clone()),
+    ));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !entered.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    store.push_end(id, "stopped", None).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(store.push_status().unwrap().events.is_empty());
+}

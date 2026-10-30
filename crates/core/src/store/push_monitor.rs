@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS push_candidates(
  article_id INTEGER,reason TEXT
 );
 CREATE INDEX IF NOT EXISTS push_pending ON push_candidates(state,retry_at,id);
+CREATE INDEX IF NOT EXISTS push_event_time ON push_candidates(COALESCE(finished_at,first_seen_at) DESC,id DESC);
+CREATE INDEX IF NOT EXISTS push_request_budget ON wb_requests(json_extract(document,'$.purpose'),json_extract(document,'$.started_at'));
 "#;
 fn run_from(conn: &Connection) -> Result<Run> {
     let text: Option<String> = conn
@@ -129,6 +131,9 @@ impl Store {
             return Ok(());
         }
         let mut run = run_from(&tx)?;
+        if run.rounds.is_multiple_of(30) {
+            tx.execute("DELETE FROM push_candidates WHERE state NOT IN ('pending','fetching') AND finished_at<?", [ts-30.*86400.])?;
+        }
         let mut remaining = MAX_CANDIDATES.saturating_sub(tx.query_row(
             "SELECT COUNT(*) FROM push_candidates WHERE state IN ('pending','fetching')",
             [],
