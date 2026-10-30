@@ -107,7 +107,11 @@ def main():
     licenses = stage / "licenses"
     licenses.mkdir()
     for item in lock["licenses"]:
-        shutil.copy2(download(item, cache), licenses / item["filename"])
+        # 全文随仓库固定：gnu.org 常拒绝构建机连接，不让发行卡在长构建之后。
+        source = ROOT / item["path"]
+        if digest(source) != item["sha256"]:
+            raise ValueError(f"许可全文摘要不匹配：{item['filename']}")
+        shutil.copy2(source, licenses / item["filename"])
     subprocess.run([sys.executable, str(ROOT / "tools/collect-third-party-licenses.py"),
                     "--output", str(licenses / "dependencies"), "--cache", str(cache)], check=True)
     # wheel 原有的完整 LICENSE/COPYING 及元数据原样留在 runtime/session-deps。

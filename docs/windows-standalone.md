@@ -50,7 +50,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Rel
 
 ## 发行包与验收边界
 
-`tools/windows-runtime.lock.json` 固定 Python 和 Windows wheels 的下载地址、版本与 SHA-256；构建时校验后原样保留 Python `LICENSE.txt`、wheel 的 `dist-info` 完整许可证，并补充 Frida wxWindows 许可引用的 GNU LGPL v2 全文。下载缓存只在忽略目录 `dist-windows/.downloads`。
+`tools/windows-runtime.lock.json` 固定 Python 和 Windows wheels 的下载地址、版本与 SHA-256；构建时校验后原样保留 Python `LICENSE.txt`、wheel 的 `dist-info` 完整许可证，并补充 Frida wxWindows 许可引用的 GNU LGPL v2 全文（随仓库保存在 `tools/licenses/`，同样校验 SHA-256）。下载缓存只在忽略目录 `dist-windows/.downloads`。
 
 构建机还会从 Cargo/pnpm 依赖复制完整许可与字体 OFL，补回上游遗漏的许可文件；MPL 组件和部分缺声明组件的原版源码一并附带。详见包内 `THIRD-PARTY-NOTICES.md` 与 `licenses/dependencies/index.json`，该过程只在构建阶段依赖 Cargo/pnpm。
 
