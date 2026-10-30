@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "article-md"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "htmd",
  "regex",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "mpider-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2943,6 +2943,7 @@ dependencies = [
  "chrono",
  "form_urlencoded",
  "hmac",
+ "htmd",
  "http-body-util",
  "hudsucker",
  "percent-encoding",
@@ -2964,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "mpider-tauri"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "mpider-core",
  "rfd",

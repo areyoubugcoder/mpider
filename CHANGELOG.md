@@ -2,6 +2,13 @@
 
 本页记录面向使用者的功能与已知限制。开发完成、实机验证和正式发布分别说明，发行状态以 [GitHub Releases](https://github.com/areyoubugcoder/mpider/releases) 为准。
 
+## v1.0.2
+
+- HTML 导出优先使用已缓存的原始正文，保留字号、颜色、居中、间距、图片宽度和本地背景图；旧库仅有 Markdown 时继续兼容导出。
+- 文章导出采用可直接打开的文件夹：可搜索的 `index.html`、按「序号_标题」命名的 HTML/Markdown、共享去重图片、`manifest.csv` 和 `README.txt`。
+- 兼容跨电脑复制数据库后缺少原归档目录的场景，并修正原图与本地 640px 图片的匹配。
+- 每篇导出文章底部加入 Mp2RSS、MPHistory 产品链接，统一携带 `from=mpider` 来源标识。
+
 ## v1.0.1
 
 - 公众号操作列固定显示「导出所有文章」，覆盖该号全部已入库文章，缺正文时提示并提供下载入口。

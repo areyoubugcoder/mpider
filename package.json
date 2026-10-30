@@ -1,7 +1,7 @@
 {
   "name": "mpider-desktop",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "mpider 桌面外壳的前端 + Tauri CLI（前端源码在 frontend/，Tauri 壳在 src-tauri/）",
   "engines": {
