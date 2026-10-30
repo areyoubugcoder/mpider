@@ -1,6 +1,6 @@
 /** 推送监测与主页识别独立开关；URL 候选与内存内容不经过前端。 */
 import { invoke } from "@tauri-apps/api/core";
-export interface PushConfig { scan_seconds: number; recent_hours: number; hourly_budget: number; bizzes: string[] }
+export interface PushConfig { scan_seconds: number; recent_hours: number; hourly_budget: number; fetch_seconds: number; bizzes: string[] }
 export interface PushRun {
   id: number; active: boolean; phase: string; config: PushConfig; started_at: number;
   last_scan_at: number; next_scan_at: number; next_fetch_at: number; processes: number;
@@ -15,12 +15,12 @@ export interface PushStatus { supported: boolean; run: PushRun; pending: number;
 export const pushStatus = () => invoke<PushStatus>("workbench_push_status");
 export const startPushMonitor = (config: PushConfig) => invoke<number>("workbench_push_start", { config });
 export const stopPushMonitor = () => invoke<void>("workbench_push_stop");
-export const defaultPushConfig: PushConfig = { scan_seconds: 10, recent_hours: 24, hourly_budget: 60, bizzes: [] };
+export const defaultPushConfig: PushConfig = { scan_seconds: 10, recent_hours: 24, hourly_budget: 3600, fetch_seconds: 1, bizzes: [] };
 export const pushOutcome = (value: string) => ({
   pending: "等待处理", fetching: "正在解析", imported: "新增入库", existing: "文章已存在", ignored: "已过滤",
   verification_required: "网页要求验证", rate_limited: "请求受限", http_error: "网页请求失败",
   network_error: "网络异常", invalid_metadata: "文章信息不完整", unavailable: "文章不可用",
-  redirect_pending: "等待跳转解析", redirect_rejected: "跳转目标不是可校验的文章", redirect_limit: "跳转次数已达上限",
+  link_updated: "已补齐签名，等待重试", redirect_pending: "等待跳转解析", redirect_rejected: "跳转目标不是可校验的文章", redirect_limit: "跳转次数已达上限",
 }[value] || value);
 export function pushPhase(run?: PushRun) {
   if (!run) return "读取中";

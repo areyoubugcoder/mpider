@@ -21,6 +21,8 @@ mod windows;
 pub use windows::WindowsScanner;
 
 pub const PURPOSE: &str = "push_metadata";
+pub const CATEGORY: &str = "webpage";
+pub const RETRY_SECONDS: f64 = 1.;
 pub const MAX_CANDIDATES: usize = 10_000;
 const MAX_HTML: usize = 8 * 1024 * 1024;
 
@@ -30,6 +32,7 @@ pub struct Config {
     pub scan_seconds: u64,
     pub recent_hours: u64,
     pub hourly_budget: i64,
+    pub fetch_seconds: u64,
     /// 空集合表示全部公众号；使用稳定 biz，不按显示名称匹配。
     pub bizzes: Vec<String>,
 }
@@ -38,7 +41,8 @@ impl Default for Config {
         Self {
             scan_seconds: 10,
             recent_hours: 24,
-            hourly_budget: 60,
+            hourly_budget: 3600,
+            fetch_seconds: 1,
             bizzes: vec![],
         }
     }
@@ -54,8 +58,12 @@ impl Config {
             "文章时间窗须为 1 至 168 小时"
         );
         ensure!(
-            (1..=120).contains(&self.hourly_budget),
-            "每小时网页请求上限须为 1 至 120"
+            (1..=3600).contains(&self.hourly_budget),
+            "每小时网页请求上限须为 1 至 3600"
+        );
+        ensure!(
+            (1..=60).contains(&self.fetch_seconds),
+            "网页请求间隔须为 1 至 60 秒"
         );
         ensure!(
             self.bizzes.len() <= 1000 && self.bizzes.iter().all(|b| valid_biz(b)),
@@ -209,7 +217,7 @@ pub fn normalize(raw: &str) -> Option<Link> {
         .append_pair("sn", &sn.to_ascii_lowercase());
     if let Some(check) = values
         .get("chksm")
-        .filter(|s| (16..=64).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_hexdigit()))
+        .filter(|s| (16..=256).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_hexdigit()))
     {
         url.query_pairs_mut().append_pair("chksm", check);
     }
@@ -463,44 +471,57 @@ pub async fn run(store: Arc<Store>, id: i64) {
     }
 }
 
-pub async fn run_with_scanner<S: Scanner>(
+pub async fn run_with_scanner<S: Scanner>(store: Arc<Store>, id: i64, scanner: S) -> Result<()> {
+    run_with_scanner_at(store, id, scanner, None).await
+}
+
+// 测试仅覆盖 HTTP 目的地；生产始终使用已验证的文章地址。
+async fn run_with_scanner_at<S: Scanner>(
     store: Arc<Store>,
     id: i64,
-    mut scanner: S,
+    scanner: S,
+    endpoint: Option<&str>,
 ) -> Result<()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOCK.lock().await;
     let client = client()?;
-    while store.push_is_active(id)? {
-        let run = store.push_run()?;
-        if now() >= run.next_scan_at {
-            let cancel = Arc::new(AtomicBool::new(false));
-            let signal = cancel.clone();
-            let mut task = tokio::task::spawn_blocking(move || {
-                let result = scanner.scan(&signal);
-                (scanner, result)
-            });
-            let (returned, result) = loop {
-                tokio::select! {
-                    result = &mut task => { break result?; }
-                    _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                        if !store.push_is_active(id)? { cancel.store(true, Ordering::Relaxed); }
-                    }
-                }
-            };
-            scanner = returned;
-            if !store.push_is_active(id)? {
-                break;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut scanner = Some(scanner);
+    let mut task: Option<tokio::task::JoinHandle<(S, Result<Scan>)>> = None;
+    // 扫描在后台进行；已有队列不必等待一轮几十秒的内存扫描结束。
+    let result = async {
+        while store.push_is_active(id)? {
+            if task.as_ref().is_some_and(|task| task.is_finished()) {
+                let (returned, scanned) = task.take().unwrap().await?;
+                scanner = Some(returned);
+                store.push_scanned(id, scanned?, now())?;
             }
-            let scan = result?;
-            store.push_scanned(id, scan, now())?;
+            if task.is_none() && now() >= store.push_run()?.next_scan_at {
+                let mut current = scanner.take().context("扫描器状态无效")?;
+                let signal = cancel.clone();
+                task = Some(tokio::task::spawn_blocking(move || {
+                    let result = current.scan(&signal);
+                    (current, result)
+                }));
+            }
+            if let Some(candidate) = store.push_next(id, now())? {
+                if let Some(endpoint) = endpoint {
+                    process_at(&store, &client, id, candidate, endpoint).await?;
+                } else {
+                    process(&store, &client, id, candidate).await?;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        if let Some(candidate) = store.push_next(id, now())? {
-            process(&store, &client, id, candidate).await?;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        Ok(())
     }
-    Ok(())
+    .await;
+    // 错误和停止均等待只读扫描退出，下一次开启不会留下并行扫描器。
+    cancel.store(true, Ordering::Relaxed);
+    if let Some(task) = task {
+        let _ = task.await;
+    }
+    result
 }
 
 async fn process(
@@ -523,7 +544,7 @@ async fn process_at(
 ) -> Result<()> {
     let link = normalize(&candidate.url).context("候选链接已损坏")?;
     let permit = store.wb_request_permit(
-        "body",
+        CATEGORY,
         PURPOSE,
         id,
         link.biz.as_deref().unwrap_or(""),
@@ -562,13 +583,12 @@ async fn process_at(
                 .and_then(|location| redirect_target(&link, location));
             store.wb_request_finish(&request_id,if verification {"verification_required"}else if next.is_some() {"redirect"}else{"http_error"},serde_json::json!({"http_status":page.status,"candidate_id":candidate.id,"redirect_accepted":next.is_some(),"verification_redirect":verification}),now())?;
             if verification {
-                store.wb_cooldown(now() + 7200.)?;
                 store.push_result(
                     id,
                     candidate.id,
                     "verification_required",
                     true,
-                    now() + 7200.,
+                    now() + RETRY_SECONDS,
                 )?;
             } else if let Some(next) = next {
                 store.push_redirect(id, candidate.id, &next.url)?;
@@ -578,27 +598,25 @@ async fn process_at(
             return Ok(());
         }
     }
-    let (outcome, meta, retry, cooldown, status) = match result {
-        Ok(HttpPage { status: 429, .. }) => ("rate_limited", None, true, true, Some(429)),
+    let (outcome, meta, retry, status) = match result {
+        Ok(HttpPage { status: 429, .. }) => ("rate_limited", None, true, Some(429)),
         Ok(HttpPage { status: code, .. }) if !(200..300).contains(&code) => {
-            ("http_error", None, code >= 500, false, Some(code))
+            ("http_error", None, code >= 500, Some(code))
         }
         Ok(HttpPage {
             status: code, html, ..
         }) => match metadata(&link, &html) {
             Ok(meta) if !candidate.key.starts_with("article:") || candidate.key == meta.key() => {
-                ("ok", Some(meta), false, false, Some(code))
+                ("ok", Some(meta), false, Some(code))
             }
-            Ok(_) => ("invalid_metadata", None, true, false, Some(code)),
+            Ok(_) => ("invalid_metadata", None, true, Some(code)),
             Err(e) if e.to_string() == "verification_required" => {
-                ("verification_required", None, true, true, Some(code))
+                ("verification_required", None, true, Some(code))
             }
-            Err(e) if e.to_string() == "unavailable" => {
-                ("unavailable", None, false, false, Some(code))
-            }
-            Err(_) => ("invalid_metadata", None, true, false, Some(code)),
+            Err(e) if e.to_string() == "unavailable" => ("unavailable", None, false, Some(code)),
+            Err(_) => ("invalid_metadata", None, true, Some(code)),
         },
-        Err(_) => ("network_error", None, true, false, None),
+        Err(_) => ("network_error", None, true, None),
     };
     store.wb_request_finish(
         &request_id,
@@ -606,19 +624,10 @@ async fn process_at(
         serde_json::json!({"http_status":status,"candidate_id":candidate.id}),
         now(),
     )?;
-    if cooldown {
-        store.wb_cooldown(now() + 7200.)?;
-    }
     if let Some(meta) = meta {
         store.push_import(id, candidate.id, &meta, now())?;
     } else {
-        store.push_result(
-            id,
-            candidate.id,
-            outcome,
-            retry,
-            if cooldown { now() + 7200. } else { now() + 60. },
-        )?;
+        store.push_result(id, candidate.id, outcome, retry, now() + RETRY_SECONDS)?;
     }
     Ok(())
 }

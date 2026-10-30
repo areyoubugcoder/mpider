@@ -41,7 +41,7 @@ export function App() {
     <div className="flex min-h-0 flex-1"><Sidebar onAbout={() => setAboutOpen(true)} showLaboratory={showLaboratory} view={view} onNav={next => { if (next === "logs") setLogExperiment(null); if (next === "articles") setArticleSource(""); setView(next); }} />
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
         {snapshot.error && <p role="alert" className="mb-4 rounded-lg border border-destructive p-3 text-sm">无法读取持久化工作台：{String(snapshot.error)}。请检查数据库和后台日志。</p>}
-        {!!snapshot.data && snapshot.data.policy.cooldown_until > Date.now() / 1000 && <p role="status" className="mb-4 rounded-lg border p-3 text-sm text-warning">全局冷却至 {new Date(snapshot.data.policy.cooldown_until * 1000).toLocaleString()}，各类请求均已等待。</p>}
+        {!!snapshot.data && snapshot.data.policy.cooldown_until > Date.now() / 1000 && <p role="status" className="mb-4 rounded-lg border p-3 text-sm text-warning">全局冷却至 {new Date(snapshot.data.policy.cooldown_until * 1000).toLocaleString()}，列表、正文和图片请求等待；推送网页解析独立运行。</p>}
         <SessionRecoveryPanel snapshot={snapshot.data} />
         {view === "accounts" && <WorkbenchSources onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "push-monitor" && <PushMonitor onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}

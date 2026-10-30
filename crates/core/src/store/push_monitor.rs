@@ -157,7 +157,15 @@ impl Store {
                 )
                 .optional()?;
             if let Some(candidate) = known {
-                tx.execute("UPDATE push_candidates SET url=CASE WHEN instr(url,'chksm=')=0 AND instr(?,'chksm=')>0 THEN ? ELSE url END WHERE id=?",params![link.url,link.url,candidate])?;
+                let improved: bool = tx.query_row("SELECT instr(url,'chksm=')=0 AND instr(?,'chksm=')>0 FROM push_candidates WHERE id=?",params![link.url,candidate],|r|r.get(0))?;
+                if improved {
+                    // 同一文章补齐签名后重排失败候选；既有入库结果和已发送次数保留。
+                    tx.execute("UPDATE push_candidates SET url=?,state='pending',reason='link_updated',retry_at=0,finished_at=NULL WHERE id=? AND attempts<3 AND state IN ('pending','http_error','verification_required','invalid_metadata','network_error','redirect_rejected')",params![link.url,candidate])?;
+                    tx.execute(
+                        "UPDATE push_candidates SET url=? WHERE id=?",
+                        params![link.url, candidate],
+                    )?;
+                }
             } else if remaining > 0 {
                 tx.execute(
                     "INSERT INTO push_candidates(key,url,first_seen_at,biz) VALUES(?,?,?,?)",
@@ -194,7 +202,7 @@ impl Store {
         if !run.active || run.id != id || ts < run.next_fetch_at {
             return Ok(None);
         }
-        Ok(conn.query_row("SELECT id,url,attempts,first_seen_at,key FROM push_candidates WHERE state='pending' AND retry_at<=? ORDER BY COALESCE(reason='redirect_pending',0) DESC,(attempts=0) DESC,first_seen_at DESC,id DESC LIMIT 1",[ts],|r|Ok(Candidate{id:r.get(0)?,url:r.get(1)?,attempts:r.get(2)?,first_seen_at:r.get(3)?,key:r.get(4)?})).optional()?)
+        Ok(conn.query_row("SELECT id,url,attempts,first_seen_at,key FROM push_candidates WHERE state='pending' AND retry_at<=? ORDER BY COALESCE(reason IN ('redirect_pending','link_updated'),0) DESC,(attempts=0) DESC,first_seen_at DESC,id DESC LIMIT 1",[ts],|r|Ok(Candidate{id:r.get(0)?,url:r.get(1)?,attempts:r.get(2)?,first_seen_at:r.get(3)?,key:r.get(4)?})).optional()?)
     }
     pub fn push_claim(&self, id: i64, candidate: i64) -> Result<bool> {
         let mut conn = self.conn();

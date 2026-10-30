@@ -1542,7 +1542,7 @@ impl Store {
         ts: f64,
     ) -> Result<Permit> {
         ensure!(
-            ["list", "body", "image"].contains(&category),
+            ["list", "body", "image", "webpage"].contains(&category),
             "未知请求类别"
         );
         let mut conn = self.conn();
@@ -1553,7 +1553,28 @@ impl Store {
             })
             .optional()?
             .unwrap_or_default();
-        let previous:Option<f64>=tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category')=?",[category],|r|r.get(0))?;
+        let push = purpose == crate::workbench::push_monitor::PURPOSE;
+        ensure!(
+            push == (category == crate::workbench::push_monitor::CATEGORY),
+            "网页解析请求类别与用途不匹配"
+        );
+        let run = if push {
+            let text: String =
+                tx.query_row("SELECT document FROM push_monitor WHERE id=1", [], |r| {
+                    r.get(0)
+                })?;
+            let run: crate::workbench::push_monitor::Run = serde_json::from_str(&text)?;
+            ensure!(run.active && run.id == owner, "推送监测已停止");
+            Some(run)
+        } else {
+            None
+        };
+        // 旧版 push_metadata 记在 body 下；按用途迁移闸门语义，无须改写历史。
+        let previous: Option<f64> = if push {
+            tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.purpose')=?", [purpose], |r| r.get(0))?
+        } else {
+            tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category')=? AND json_extract(document,'$.purpose')<>?", params![category,crate::workbench::push_monitor::PURPOSE], |r| r.get(0))?
+        };
         let native_previous: Option<f64> = if category == "list" {
             tx.query_row("SELECT MAX(ts) FROM native_call_log", [], |r| r.get(0))?
         } else {
@@ -1563,25 +1584,29 @@ impl Store {
             .into_iter()
             .chain(native_previous)
             .max_by(f64::total_cmp);
-        let gap = match category {
-            "list" => crate::rng::between(p.list_min_ms, p.list_max_ms),
-            "body" => p.body_gap_ms,
-            _ => p.image_gap_ms,
+        let gap = if let Some(run) = &run {
+            run.config.fetch_seconds * 1000
+        } else {
+            match category {
+                "list" => crate::rng::between(p.list_min_ms, p.list_max_ms),
+                "body" => p.body_gap_ms,
+                _ => p.image_gap_ms,
+            }
         };
-        let mut next = last
-            .map_or(ts, |v| v + gap as f64 / 1000.)
-            .max(p.cooldown_until);
-        let mut reason = (next > ts).then(|| "请求间隔或全局冷却".to_string());
-        if purpose == crate::workbench::push_monitor::PURPOSE {
-            let text: String =
-                tx.query_row("SELECT document FROM push_monitor WHERE id=1", [], |r| {
-                    r.get(0)
-                })?;
-            let run: crate::workbench::push_monitor::Run = serde_json::from_str(&text)?;
-            ensure!(
-                category == "body" && run.active && run.id == owner,
-                "推送监测已停止"
-            );
+        // 无凭证文章页独立节奏；既不延长其他请求的冷却，也不受其冷却阻塞。
+        let mut next = last.map_or(ts, |v| v + gap as f64 / 1000.);
+        if !push {
+            next = next.max(p.cooldown_until);
+        }
+        let mut reason = (next > ts).then(|| {
+            if push {
+                "网页解析请求间隔"
+            } else {
+                "请求间隔或全局冷却"
+            }
+            .to_string()
+        });
+        if let Some(run) = run {
             let (count, oldest): (i64, Option<f64>) = tx.query_row("SELECT COUNT(*),MIN(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.purpose')=? AND json_extract(document,'$.started_at')>?",params![purpose,ts-3600.],|r|Ok((r.get(0)?,r.get(1)?)))?;
             if count >= run.config.hourly_budget {
                 next = next.max(oldest.unwrap_or(ts) + 3600. + 0.01);

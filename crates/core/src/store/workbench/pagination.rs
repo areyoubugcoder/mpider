@@ -157,7 +157,7 @@ impl Store {
     ) -> Result<WorkbenchPage<RequestEvent>> {
         validate(limit, offset)?;
         ensure!(
-            since.is_finite() && ["", "list", "body", "image"].contains(&category),
+            since.is_finite() && ["", "list", "body", "image", "webpage"].contains(&category),
             "请求筛选无效"
         );
         let native="json_object('id',request_id,'category','list','purpose',CASE WHEN action=0 THEN 'home' ELSE 'legacy_page' END,'owner_id',job_id,'owner_kind','native','biz','','started_at',ts,'finished_at',CASE WHEN latency_ms IS NULL THEN NULL ELSE ts+latency_ms/1000.0 END,'outcome',outcome,'policy_version',policy_version,'gap_ms',gap_ms,'detail',json_object('transport',transport,'outer_ret',outer_ret,'jsapi_ret',jsapi_ret,'inner_ret',inner_ret,'reason',reason))";

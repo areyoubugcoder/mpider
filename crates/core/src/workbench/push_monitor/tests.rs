@@ -37,11 +37,6 @@ fn setup(config: Config) -> (Store, i64, i64) {
     let candidate = store.push_next(id, now()).unwrap().unwrap().id;
     (store, id, candidate)
 }
-fn no_gap(store: &Store) {
-    let mut policy = store.wb_policy().unwrap();
-    policy.body_gap_ms = 0;
-    store.wb_set_policy(policy).unwrap();
-}
 
 #[test]
 fn identity_includes_biz_and_input_drops_session_tracking_parameters() {
@@ -65,6 +60,124 @@ fn identity_includes_biz_and_input_drops_session_tracking_parameters() {
             .replace("0123456789abcdef0123456789abcdef", "bad")
     )
     .is_none());
+}
+
+#[test]
+fn long_checksum_survives_discovery_and_requeues_failed_candidate_without_resetting_attempts() {
+    let checksum = "ab".repeat(38);
+    let raw = format!("{}&key=discard-me", link("FAKE_A").url);
+    let raw = raw.replace("chksm=0123456789abcdef", &format!("chksm={checksum}"));
+    let signed = normalize(&raw).unwrap();
+    assert!(signed.url.contains(&format!("chksm={checksum}")));
+    assert!(!signed.url.contains("key="));
+    let utf16: Vec<u8> = raw.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    for bytes in [raw.as_bytes(), utf16.as_slice()] {
+        assert_eq!(discover(bytes), vec![signed.clone()]);
+    }
+    let store = Store::open_in_memory().unwrap();
+    let id = store.push_start(Config::default()).unwrap();
+    let mut unsigned = link("FAKE_A");
+    unsigned.url = unsigned.url.split("&chksm=").next().unwrap().to_owned();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![unsigned],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    let candidate = store.push_next(id, now()).unwrap().unwrap().id;
+    store.push_claim(id, candidate).unwrap();
+    store
+        .push_result(id, candidate, "http_error", false, 0.)
+        .unwrap();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![signed.clone()],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    let next = store.push_next(id, now()).unwrap().unwrap();
+    assert_eq!(next.id, candidate);
+    assert_eq!(next.attempts, 1);
+    assert_eq!(next.url, signed.url);
+    assert_eq!(
+        store.push_status().unwrap().events[0].reason.as_deref(),
+        Some("link_updated")
+    );
+    assert_eq!(store.push_status().unwrap().requests_hour, 0);
+}
+
+#[test]
+fn old_config_gets_one_second_interval_and_new_default_budget_is_3600() {
+    let config: Config = serde_json::from_str(r#"{"hourly_budget":18}"#).unwrap();
+    assert_eq!(config.fetch_seconds, 1);
+    assert_eq!(config.hourly_budget, 18);
+    assert_eq!(Config::default().hourly_budget, 3600);
+    assert!(Config {
+        fetch_seconds: 0,
+        ..Default::default()
+    }
+    .validate()
+    .is_err());
+}
+
+#[tokio::test]
+async fn queued_webpage_is_fetched_while_memory_scan_is_still_running() {
+    struct WaitingScanner(Arc<AtomicBool>);
+    impl Scanner for WaitingScanner {
+        fn scan(&mut self, cancel: &AtomicBool) -> Result<Scan> {
+            self.0.store(true, Ordering::Relaxed);
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(Scan::default())
+        }
+    }
+    let store = Store::open_in_memory().unwrap();
+    let id = store.push_start(Config::default()).unwrap();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![link("FAKE_A")],
+                ..Default::default()
+            },
+            now() - 20.,
+        )
+        .unwrap();
+    let store = Arc::new(store);
+    let entered = Arc::new(AtomicBool::new(false));
+    let (endpoint, server) = fixture(200, html("FAKE_A")).await;
+    let clone = store.clone();
+    let scanner = WaitingScanner(entered.clone());
+    let task =
+        tokio::spawn(async move { run_with_scanner_at(clone, id, scanner, Some(&endpoint)).await });
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !entered.load(Ordering::Relaxed) || store.push_status().unwrap().imported != 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(store.push_run().unwrap().rounds, 1);
+    store.push_end(id, "stopped", None).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.push_status().unwrap().requests_hour, 1);
 }
 
 #[test]
@@ -238,15 +351,14 @@ fn deleted_accounts_and_outside_window_are_not_recreated() {
 }
 
 #[test]
-fn hourly_budget_survives_runs_and_body_gap_is_shared() {
+fn hourly_budget_survives_runs_and_webpage_rate_is_independent() {
     let (store, id, _) = setup(Config {
         hourly_budget: 1,
         ..Default::default()
     });
-    no_gap(&store);
     let ts = now();
     let permit = store
-        .wb_request_permit("body", PURPOSE, id, "FAKE_A", ts)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts)
         .unwrap();
     assert!(permit.request_id.is_some());
     store.push_end(id, "stopped", None).unwrap();
@@ -257,7 +369,7 @@ fn hourly_budget_survives_runs_and_body_gap_is_shared() {
         })
         .unwrap();
     let denied = store
-        .wb_request_permit("body", PURPOSE, second, "FAKE_A", ts + 5.)
+        .wb_request_permit(CATEGORY, PURPOSE, second, "FAKE_A", ts + 5.)
         .unwrap();
     assert!(denied.request_id.is_none());
     assert!(denied.next_at >= ts + 3600.);
@@ -269,7 +381,27 @@ fn hourly_budget_survives_runs_and_body_gap_is_shared() {
         .wb_request_permit("body", "archive", 777, "FAKE_A", ts)
         .unwrap();
     assert!(store
-        .wb_request_permit("body", PURPOSE, id, "FAKE_A", ts + 1.)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 0.1)
+        .unwrap()
+        .request_id
+        .is_some());
+    let early = store
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 0.9)
+        .unwrap();
+    assert!(early.request_id.is_none());
+    assert!((early.next_at - (ts + 1.1)).abs() < 0.001);
+    let body = store
+        .wb_request_permit("body", "archive", 777, "FAKE_A", ts + 1.)
+        .unwrap();
+    assert!((body.next_at - (ts + 30.)).abs() < 0.001);
+    store.wb_cooldown(ts + 7200.).unwrap();
+    assert!(store
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 1.1)
+        .unwrap()
+        .request_id
+        .is_some());
+    assert!(store
+        .wb_request_permit("body", "archive", 777, "FAKE_A", ts + 31.)
         .unwrap()
         .request_id
         .is_none());
@@ -303,7 +435,6 @@ async fn fixture_with_location(
 #[tokio::test]
 async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
     let (store, id, candidate_id) = setup(Config::default());
-    no_gap(&store);
     let (endpoint, server) = fixture_with_location(
         302,
         String::new(),
@@ -334,6 +465,7 @@ async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
     let next = store.push_next(id, now() + 2.).unwrap().unwrap();
     assert_eq!(next.id, candidate_id);
     assert!(!next.url.contains("key="));
+    tokio::time::sleep(Duration::from_millis(1050)).await;
     let (endpoint, server) = fixture(200, html("FAKE_A")).await;
     process_at(&store, &client().unwrap(), id, next, &endpoint)
         .await
@@ -355,7 +487,6 @@ async fn redirect_waits_for_hourly_budget_after_reopen_without_hidden_http() {
         hourly_budget: 1,
         ..Default::default()
     });
-    no_gap(&store);
     let (endpoint, server) =
         fixture_with_location(302, String::new(), Some(link("FAKE_A").url)).await;
     process_at(
@@ -397,7 +528,6 @@ async fn redirect_to_other_domain_or_other_known_article_never_gets_followed() {
         link("FAKE_B").url,
     ] {
         let (store, id, _) = setup(Config::default());
-        no_gap(&store);
         let (endpoint, server) = fixture_with_location(302, String::new(), Some(target)).await;
         process_at(
             &store,
@@ -421,8 +551,10 @@ async fn redirect_to_other_domain_or_other_known_article_never_gets_followed() {
 #[tokio::test]
 async fn redirect_loop_stops_after_three_counted_requests() {
     let (store, id, _) = setup(Config::default());
-    no_gap(&store);
-    for _ in 0..3 {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(1050)).await;
+        }
         let (endpoint, server) =
             fixture_with_location(302, String::new(), Some(link("FAKE_A").url)).await;
         process_at(
@@ -447,7 +579,6 @@ async fn redirect_loop_stops_after_three_counted_requests() {
 #[tokio::test]
 async fn short_redirect_cannot_replace_original_full_article_identity() {
     let (store, id, _) = setup(Config::default());
-    no_gap(&store);
     let (endpoint, server) = fixture_with_location(
         302,
         String::new(),
@@ -464,6 +595,7 @@ async fn short_redirect_cannot_replace_original_full_article_identity() {
     .await
     .unwrap();
     server.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1050)).await;
     let (endpoint, server) = fixture(200, html("FAKE_B")).await;
     process_at(
         &store,
@@ -483,9 +615,8 @@ async fn short_redirect_cannot_replace_original_full_article_identity() {
 }
 
 #[tokio::test]
-async fn verification_redirect_is_not_followed_and_enters_cooldown() {
+async fn verification_redirect_is_not_followed_and_retries_after_one_second() {
     let (store, id, _) = setup(Config::default());
-    no_gap(&store);
     let (endpoint, server) = fixture_with_location(
         302,
         String::new(),
@@ -507,12 +638,13 @@ async fn verification_redirect_is_not_followed_and_enters_cooldown() {
         store.push_status().unwrap().events[0].reason.as_deref(),
         Some("verification_required")
     );
-    assert!(store.wb_policy().unwrap().cooldown_until > now() + 7100.);
+    assert_eq!(store.wb_policy().unwrap().cooldown_until, 0.);
+    assert!(store.push_next(id, now() + 1.1).unwrap().is_some());
     assert!(store.push_next(id, now()).unwrap().is_none());
 }
 
 #[tokio::test]
-async fn real_http_success_commits_and_verification_or_429_cools_down_with_pending_candidate() {
+async fn real_http_failures_retry_soon_without_global_cooldown() {
     for (code, body, expected) in [
         (200, html("FAKE_A"), "imported"),
         (200, "<html>环境异常 完成验证后</html>".into(), "pending"),
@@ -520,7 +652,6 @@ async fn real_http_success_commits_and_verification_or_429_cools_down_with_pendi
         (503, String::new(), "pending"),
     ] {
         let (store, id, _) = setup(Config::default());
-        no_gap(&store);
         let candidate = store.push_next(id, now()).unwrap().unwrap();
         let (endpoint, server) = fixture(code, body).await;
         process_at(&store, &client().unwrap(), id, candidate, &endpoint)
@@ -532,7 +663,8 @@ async fn real_http_success_commits_and_verification_or_429_cools_down_with_pendi
         assert_eq!(status.events[0].outcome, expected);
         assert_eq!(status.requests_hour, 1);
         if code == 429 || status.events[0].reason.as_deref() == Some("verification_required") {
-            assert!(store.wb_policy().unwrap().cooldown_until > now() + 7100.);
+            assert_eq!(store.wb_policy().unwrap().cooldown_until, 0.);
+            assert!(store.push_next(id, now() + 1.1).unwrap().is_some());
         }
         assert_eq!(status.imported, i64::from(expected == "imported"));
     }
@@ -542,7 +674,6 @@ async fn real_http_success_commits_and_verification_or_429_cools_down_with_pendi
 async fn stop_during_http_does_not_commit_late_reply() {
     let (store, id, _) = setup(Config::default());
     let store = Arc::new(store);
-    no_gap(&store);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/s", listener.local_addr().unwrap());
     let candidate = store.push_next(id, now()).unwrap().unwrap();
@@ -593,7 +724,7 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
             .unwrap();
         let candidate = store.push_next(id, now()).unwrap().unwrap();
         store
-            .wb_request_permit("body", PURPOSE, id, "FAKE_A", now())
+            .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", now())
             .unwrap();
         store.push_claim(id, candidate.id).unwrap();
     }
@@ -609,7 +740,7 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
             .unwrap();
         assert_eq!(store.push_next(id, now()).unwrap().unwrap().attempts, 1);
         assert!(store
-            .wb_request_permit("body", PURPOSE, id, "FAKE_A", now())
+            .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", now())
             .unwrap()
             .request_id
             .is_none());
