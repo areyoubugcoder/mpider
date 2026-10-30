@@ -50,6 +50,33 @@ jobs:
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER: powershell -NoProfile -ExecutionPolicy Bypass -File ${{ github.workspace }}/tools/run-windows-test.ps1
         run: cargo test --locked -p mpider-core -p article-md -p mpider-tauri
+      # 手动验收只留存开发程序，不发布 Release 或修改正式安装包。
+      - uses: pnpm/action-setup@v6.1.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          version: 9
+      - uses: actions/setup-node@v7.1.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 构建专机验收程序
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          cargo build --locked -p mpider-core --example push_monitor
+          pnpm tauri build --debug --no-bundle
+      - uses: actions/upload-artifact@v7.0.2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: push-monitor-windows-validation
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            target/debug/examples/push_monitor.exe
+            target/debug/mpider-tauri.exe
 
   frontend:
     name: Frontend

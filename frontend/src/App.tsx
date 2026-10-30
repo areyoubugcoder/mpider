@@ -19,6 +19,8 @@ import { WorkbenchSources, WorkbenchTasks, WorkbenchArticles, WorkbenchRate, Wor
 import { CursorLab } from "@/views/CursorLab";
 import { SystemLogs } from "@/views/SystemLogs";
 import { Faq } from "@/views/Faq";
+import { PushMonitor } from "@/views/PushMonitor";
+import { pushStatus, pushPhase } from "@/lib/push-monitor";
 import type { View } from "@/views/types";
 
 export function App() {
@@ -34,6 +36,7 @@ export function App() {
   const [logExperiment, setLogExperiment] = useState<number | null>(null);
   const health = useQuery({ queryKey: ["health"], queryFn: coreHealth });
   const snapshot = useQuery({ queryKey: ["workbench"], queryFn: workbenchSnapshot, refetchInterval: 2000 });
+  const push = useQuery({ queryKey: ["push-monitor"], queryFn: pushStatus, refetchInterval: 2000 });
   return <UpdateProvider><div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
     <div className="flex min-h-0 flex-1"><Sidebar onAbout={() => setAboutOpen(true)} showLaboratory={showLaboratory} view={view} onNav={next => { if (next === "logs") setLogExperiment(null); if (next === "articles") setArticleSource(""); setView(next); }} />
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
@@ -41,6 +44,7 @@ export function App() {
         {!!snapshot.data && snapshot.data.policy.cooldown_until > Date.now() / 1000 && <p role="status" className="mb-4 rounded-lg border p-3 text-sm text-warning">全局冷却至 {new Date(snapshot.data.policy.cooldown_until * 1000).toLocaleString()}，各类请求均已等待。</p>}
         <SessionRecoveryPanel snapshot={snapshot.data} />
         {view === "accounts" && <WorkbenchSources onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
+        {view === "push-monitor" && <PushMonitor onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "jobs" && <WorkbenchTasks kind={taskKind} onKindChange={setTaskKind} />}
         {view === "articles" && <WorkbenchArticles key={articleSource} biz={articleSource} onBizChange={setArticleSource} />}
         {view === "ratelimit" && <WorkbenchRate />}
@@ -56,6 +60,7 @@ export function App() {
       <ExportQueueBar />
       {!!snapshot.data?.active_queues?.history.task_count && <QueueProgressTrigger queue={snapshot.data.active_queues.history} label="历史采集" hint="点击查看历史采集任务" onClick={()=>{setTaskKind("history");setView("jobs");}} />}</div>
       <HomeSyncStatus snapshot={snapshot.data} />
+      <button type="button" className="shrink-0 hover:text-foreground" onClick={() => setView("push-monitor")} title="查看推送监测">推送监测：{pushPhase(push.data?.run)}</button>
     </footer><AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} version={health.data?.app_version || bundledVersion} /><Toaster />
   </div></UpdateProvider>;
 }

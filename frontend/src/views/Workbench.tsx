@@ -80,7 +80,7 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
   const rows=listing.data?.items||[];const total=listing.data?.total;
   useServerPage(total,pageSize,page,setPage);
   const validTarget = mode === "count" ? Number.isInteger(count) && count > 0 && count <= 4294967295 : !!date && Number.isFinite(new Date(`${date}T00:00:00`).getTime());
-  return <Page title="公众号" description="开启公众号监测后，在微信手动打开公众号主页。发现的公众号均显示在列表，文章同步与历史采集按公众号单独操作。">
+  return <Page title="公众号" description="开启主页识别后，在微信手动打开公众号主页。发现的公众号均显示在列表，文章同步与历史采集按公众号单独操作。">
     <HomeMonitoringCard snapshot={data} windows={windows} />
     <Panel title="公众号列表" description="监测只登记公众号与会话；采集文章、下载正文和导出均通过操作列发起。">
       <Input aria-label="搜索公众号" placeholder="搜索名称或公众号 ID" className="max-w-sm" value={search} onChange={e => {setSearch(e.target.value);setPage(0);}} />
@@ -119,7 +119,7 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
             <TaskMoreActions tasks={[{task:home,label:"取消首页同步"},{task:history,label:"取消历史采集"}]} busy={busy} run={run}><DropdownMenuItem className="text-destructive focus:text-destructive" disabled={busy} onSelect={() => setDeletingSource({biz:s.biz,nickname:s.nickname,article_count:s.article_count})}>删除公众号</DropdownMenuItem></TaskMoreActions>
           </div></TableCell>
         </TableRow>;
-      })}</TableBody></Table> : <Empty>{listing.isPending ? "正在读取公众号…" : listing.error ? "公众号读取失败，请重试。" : search ? "没有匹配的公众号。" : "尚无公众号。开启公众号监测后，请在微信手动打开公众号主页。"}</Empty>}
+      })}</TableBody></Table> : <Empty>{listing.isPending ? "正在读取公众号…" : listing.error ? "公众号读取失败，请重试。" : search ? "没有匹配的公众号。" : "尚无公众号。开启主页识别后，请在微信手动打开公众号主页。"}</Empty>}
       {listing.error && <p role="alert" className="text-sm text-destructive">公众号读取失败：{String(listing.error)}</p>}
       <Pager label="公众号" page={page} total={total??0} pageSize={pageSize} busy={listing.isFetching} onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} unit="个" />
     </Panel>

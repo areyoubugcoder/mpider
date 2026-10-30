@@ -56,6 +56,7 @@ fn safe_context(value: Value) -> Value {
         "task_id",
         "experiment_id",
         "discovery_id",
+        "monitor_run_id",
         "article_id",
         "request_id",
         "cursor_id",

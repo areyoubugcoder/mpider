@@ -3,6 +3,7 @@ pub mod archive;
 pub mod discovery;
 pub mod engine;
 pub mod markdown_export;
+pub mod push_monitor;
 #[cfg(test)]
 mod tests;
 
@@ -205,7 +206,7 @@ pub struct TaskProgress {
     pub finished_ids: Vec<i64>,
 }
 
-pub const SESSION_RECOVERY_HINT: &str = "点击“更新会话并继续”，软件启动主页监测，监测就绪后请在微信打开或刷新该公众号主页；新会话保存后自动继续，原游标与历史进度保留";
+pub const SESSION_RECOVERY_HINT: &str = "点击“更新会话并继续”，软件启动主页识别，监测就绪后请在微信打开或刷新该公众号主页；新会话保存后自动继续，原游标与历史进度保留";
 
 /// 用户明确下发的恢复意图；绑定同步运行、公众号和原会话，停止或暂停即撤销。
 #[derive(Clone, Debug, Serialize, Deserialize)]

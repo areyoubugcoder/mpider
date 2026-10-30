@@ -2527,6 +2527,7 @@ pub fn run() {
                 serde_json::json!({"outcome":"ready"}),
             )?;
             store.wb_restart(mpider_core::model::now())?;
+            store.push_restart()?;
             let workbench_store = store.clone();
             let workbench_dir = Path::new(&db_path)
                 .parent()
@@ -2603,6 +2604,9 @@ pub fn run() {
             updater::update_clear,
             updater::update_install,
             workbench::workbench_snapshot,
+            workbench::workbench_push_status,
+            workbench::workbench_push_start,
+            workbench::workbench_push_stop,
             workbench::workbench_article_body_states,
             workbench::workbench_source_page,
             workbench::workbench_task_page,

@@ -14,7 +14,7 @@ export function homeSyncState(discovery?: Discovery | null) {
 export function recoveryMessage(task: Task, discovery?: Discovery | null) {
   const r = task.progress.session_recovery;
   if (!recoveryIsWaiting(task)) return task.reason || "会话需要更新，原任务进度已保留。";
-  if (r?.phase === "starting" || discovery?.state === "starting") return "正在启动主页监测。监测就绪后，请在微信打开该公众号主页。";
+  if (r?.phase === "starting" || discovery?.state === "starting") return "正在启动主页识别。识别就绪后，请在微信打开该公众号主页。";
   if (r?.phase === "preparing_session") return "已收到目标公众号首页，正在准备新会话。";
-  return "监测已就绪，请在微信打开该公众号主页；若主页已打开，请重新进入或刷新。收到新会话后将自动继续，无需再次点击。";
+  return "识别已就绪，请在微信打开该公众号主页；若主页已打开，请重新进入或刷新。收到新会话后将自动继续，无需再次点击。";
 }

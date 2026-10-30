@@ -23,6 +23,7 @@ use crate::model::{
 };
 
 mod native;
+mod push_monitor;
 pub mod system_logs;
 mod workbench;
 
@@ -376,6 +377,7 @@ impl Store {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch(native::SCHEMA)?;
         conn.execute_batch(workbench::SCHEMA)?;
+        conn.execute_batch(push_monitor::SCHEMA)?;
         // 系统日志迁移必须确认成功，禁止因磁盘或权限失败而静默丢失日志字段。
         let has_context = conn
             .prepare("PRAGMA table_info(app_log)")?

@@ -1,4 +1,5 @@
 export type View =
+  | "push-monitor"
   | "lab"
   | "dashboard"
   | "native"

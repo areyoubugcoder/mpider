@@ -1572,6 +1572,22 @@ impl Store {
             .map_or(ts, |v| v + gap as f64 / 1000.)
             .max(p.cooldown_until);
         let mut reason = (next > ts).then(|| "请求间隔或全局冷却".to_string());
+        if purpose == crate::workbench::push_monitor::PURPOSE {
+            let text: String =
+                tx.query_row("SELECT document FROM push_monitor WHERE id=1", [], |r| {
+                    r.get(0)
+                })?;
+            let run: crate::workbench::push_monitor::Run = serde_json::from_str(&text)?;
+            ensure!(
+                category == "body" && run.active && run.id == owner,
+                "推送监测已停止"
+            );
+            let (count, oldest): (i64, Option<f64>) = tx.query_row("SELECT COUNT(*),MIN(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.purpose')=? AND json_extract(document,'$.started_at')>?",params![purpose,ts-3600.],|r|Ok((r.get(0)?,r.get(1)?)))?;
+            if count >= run.config.hourly_budget {
+                next = next.max(oldest.unwrap_or(ts) + 3600. + 0.01);
+                reason = Some("近一小时网页请求额度用完，待处理链接已保留".into());
+            }
+        }
         if category == "list" {
             let (count,oldest):(i64,Option<f64>)=tx.query_row("SELECT COUNT(*),MIN(t) FROM (SELECT json_extract(document,'$.started_at') t FROM wb_requests WHERE json_extract(document,'$.category')='list' UNION ALL SELECT ts FROM native_call_log) WHERE t>?",[ts-86400.],|r|Ok((r.get(0)?,r.get(1)?)))?;
             if count >= p.list_daily_budget {
@@ -1600,6 +1616,8 @@ impl Store {
             owner_id: owner,
             owner_kind: if purpose.starts_with("cursor_") {
                 "experiment"
+            } else if purpose == crate::workbench::push_monitor::PURPOSE {
+                "push_monitor"
             } else {
                 "task"
             }
@@ -1868,7 +1886,9 @@ fn unfinished_download_ids(tx: &Transaction<'_>) -> Result<HashSet<i64>> {
     Ok(result)
 }
 fn request_module(event: &RequestEvent) -> &str {
-    if event.owner_kind == "experiment" {
+    if event.owner_kind == "push_monitor" {
+        "push_monitor"
+    } else if event.owner_kind == "experiment" {
         "experiment"
     } else if event.category == "list" {
         "history"
@@ -1880,6 +1900,8 @@ fn request_context(event: &RequestEvent) -> Value {
     let mut value = json!({"request_id":event.id,"biz":event.biz,"category":event.category,"purpose":event.purpose,"policy_version":event.policy_version});
     value[if event.owner_kind == "experiment" {
         "experiment_id"
+    } else if event.owner_kind == "push_monitor" {
+        "monitor_run_id"
     } else {
         "task_id"
     }] = json!(event.owner_id);

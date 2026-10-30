@@ -9,6 +9,7 @@ import {
   Info,
   MessageSquarePlus,
   CircleHelp,
+  Radio,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [{
   label: "工作台",
   items: [
     { key: "accounts", label: "公众号", icon: List },
+    { key: "push-monitor", label: "推送监测", icon: Radio },
     { key: "articles", label: "文章库", icon: Newspaper },
     { key: "jobs", label: "任务", icon: ListChecks },
     { key: "ratelimit", label: "限流配置", icon: Gauge },

@@ -12,6 +12,36 @@ fn root(state: &AppState) -> Result<PathBuf, String> {
         .join("workbench"))
 }
 #[tauri::command]
+pub fn workbench_push_status(
+    state: State<'_, AppState>,
+) -> Result<core::push_monitor::Status, String> {
+    state.store.push_status().map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workbench_push_start(
+    state: State<'_, AppState>,
+    config: core::push_monitor::Config,
+) -> Result<i64, String> {
+    root(&state)?;
+    if !cfg!(windows) {
+        return Err("推送监测仅支持 Windows，请在已登录微信的 Windows 电脑开启".into());
+    }
+    let id = state.store.push_start(config).map_err(|e| e.to_string())?;
+    let store = state.store.clone();
+    tauri::async_runtime::spawn(async move {
+        core::push_monitor::run(store, id).await;
+    });
+    Ok(id)
+}
+#[tauri::command]
+pub fn workbench_push_stop(state: State<'_, AppState>) -> Result<(), String> {
+    let id = state.store.push_run().map_err(|e| e.to_string())?.id;
+    state
+        .store
+        .push_end(id, "stopped", None)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 pub fn workbench_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
     state.store.wb_snapshot().map_err(|e| e.to_string())
 }
