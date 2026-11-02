@@ -1159,7 +1159,11 @@ async fn stopping_scan_keeps_inflight_queue_request_and_its_result() {
         .unwrap()
         .unwrap();
     let mut request = [0u8; 4096];
-    socket.read(&mut request).await.unwrap();
+    let received = socket.read(&mut request).await.unwrap();
+    assert!(
+        received > 0,
+        "queue request must arrive before stopping scan"
+    );
     store.push_end(id, "stopped", None).unwrap();
     let body = html("FAKE_A");
     socket
