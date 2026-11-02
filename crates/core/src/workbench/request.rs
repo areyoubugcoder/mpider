@@ -63,13 +63,14 @@ mod tests {
         let event = store.wb_requests(0.).unwrap().pop().unwrap();
         assert_eq!(event.outcome, "interrupted");
         let end = event.finished_at.unwrap();
-        assert!(store
+        let waiting = store
             .wb_request_permit("body", "archive", 1, "FAKE", end + 9.)
-            .unwrap()
-            .request_id
-            .is_none());
+            .unwrap();
+        assert!(waiting.request_id.is_none());
+        // SQLite JSON 账本的时间文本可能舍入，实际工作位以 REAL 时间为准。
+        assert!(waiting.next_at >= end + 9.99);
         assert!(store
-            .wb_request_permit("body", "archive", 1, "FAKE", end + 10.)
+            .wb_request_permit("body", "archive", 1, "FAKE", waiting.next_at)
             .unwrap()
             .request_id
             .is_some());

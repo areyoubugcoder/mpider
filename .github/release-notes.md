@@ -1,12 +1,11 @@
-## MPider v1.0.2
+## MPider v2.0.0
 
-- **HTML 保留正文排版**：从已缓存的原始 HTML 提取正文，保留字号、颜色、对齐、间距和图片样式；没有 HTML 的旧库继续使用 Markdown 导出。
-- **导出目录更易浏览**：直接打开 `index.html` 搜索标题，文章按「序号_标题」命名；HTML 与 Markdown 共用去重图片，附带 CSV 清单与使用说明，不生成文章 ZIP。
-- 兼容跨电脑复制数据库后缺少原归档目录的情况，修正原图与本地 640px 图片的匹配。
-- 导出文章底部新增 Mp2RSS、MPHistory 产品链接，携带 `from=mpider` 来源标识。
+- **推送监测**：发现本地微信中的文章链接，解析后去重入库；与用于登记公众号和会话的「主页识别」独立控制。
+- **文章下载节奏**：空闲并发工作位立即请求，网页响应结束后等待配置间隔再继续；列表与文章分开配置，文章解析与下载共用近24小时预算。
+- **发现与搜索**：最近一小时记录按20条加载更多，已登记公众号支持名称和ID模糊搜索；完善长链接签名、短链接跳转和重试。
 
-Windows x64：推荐使用 `MPider_1.0.2_x64-setup.exe`，也提供中文 MSI 和完整便携 ZIP。
+Windows x64：推荐 `MPider_2.0.0_x64-setup.exe`，同时提供中文 MSI、完整便携 ZIP 和签名更新清单。
 
-本次验证包括离线回归、新华社 49 篇文章的导出和浏览器排版对照；不包含新的微信真机采集或 Windows 安装升级实测。仅支持已适配的微信 4.1.15.56 x64。
+推送监测与下载节奏已经过本地构建、专机安装及本地HTTP时序回归。具体功能边界见[推送监测说明](https://github.com/areyoubugcoder/mpider/blob/v2.0.0/docs/push-monitor.md)。监测无法保证发现离线期间全部推送；文章入库后，完整正文与图片仍需通过文章下载任务获取。当前原生会话方案仅适配微信4.1.15.56 x64。
 
-[更新记录](https://github.com/areyoubugcoder/mpider/blob/main/CHANGELOG.md)
+[完整更新记录](https://github.com/areyoubugcoder/mpider/blob/v2.0.0/CHANGELOG.md)
