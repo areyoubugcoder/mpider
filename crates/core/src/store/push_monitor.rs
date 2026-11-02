@@ -451,7 +451,6 @@ impl Store {
             .flatten();
         let daily_budget =
             daily_budget.unwrap_or(crate::workbench::Policy::default().body_daily_budget);
-        let events = event_page(&tx, None, 20, now())?.items;
         tx.commit()?;
         Ok(Status {
             supported: cfg!(windows),
@@ -460,7 +459,6 @@ impl Store {
             imported,
             requests_24h,
             daily_budget,
-            events,
         })
     }
 }

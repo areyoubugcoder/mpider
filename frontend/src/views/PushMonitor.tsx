@@ -15,7 +15,7 @@ const date = (value?: number | null) => value ? new Date(value * 1000).toLocaleS
 export function PushMonitor({ onArticles, onRate }: { onArticles: (biz: string) => void; onRate: () => void }) {
   const status = useQuery({ queryKey: ["push-monitor"], queryFn: pushStatus, refetchInterval: 2000 });
   const feed = useInfiniteQuery({
-    queryKey: ["push-events"], initialPageParam: null as PushEventCursor | null,
+    queryKey: ["push-events"], gcTime: 0, initialPageParam: null as PushEventCursor | null,
     queryFn: ({ pageParam }) => pushEvents(pageParam),
     getNextPageParam: page => page.next_cursor ?? undefined,
     refetchInterval: 2000,
@@ -79,7 +79,7 @@ export function PushMonitor({ onArticles, onRate }: { onArticles: (biz: string) 
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">文章解析与文章下载共用下载间隔和近24小时文章预算。文章、图片的频率及重试设置统一在限流配置调整。</p><Button variant="outline" size="sm" onClick={onRate}>前往限流配置</Button></div>
     </CardContent></Card>
-    <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="text-base">最近发现</CardTitle><CardDescription className="mt-2">仅显示最近一小时内首次发现的记录，可加载更多。发现时间不是微信推送送达时间；打开旧文章也可能产生记录。</CardDescription></div><Button variant="outline" onClick={() => onArticles("")}>查看文章库</Button></div></CardHeader>
+    <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="text-base">最近发现</CardTitle><CardDescription className="mt-2">仅查询最近一小时内首次发现的记录，首次加载 20 条，点击“加载更多”再读取下一批 20 条。发现时间不是微信推送送达时间；打开旧文章也可能产生记录。</CardDescription></div><Button variant="outline" onClick={() => onArticles("")}>查看文章库</Button></div></CardHeader>
       <CardContent className="space-y-4">
         {feed.error && <p role="alert" className="text-sm text-destructive">发现记录读取失败：{String(feed.error)} <button type="button" className="underline" onClick={() => { void feed.refetch(); }}>重试</button></p>}
         <Table><TableHeader><TableRow>{["发现时间", "公众号 / 文章", "发布时间", "入库结果"].map(s => <TableHead key={s}>{s}</TableHead>)}</TableRow></TableHeader><TableBody>

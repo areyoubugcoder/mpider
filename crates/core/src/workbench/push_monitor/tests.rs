@@ -108,7 +108,9 @@ fn long_checksum_survives_discovery_and_requeues_failed_candidate_without_resett
     assert_eq!(next.attempts, 1);
     assert_eq!(next.url, signed.url);
     assert_eq!(
-        store.push_status().unwrap().events[0].reason.as_deref(),
+        store.push_events(None, 100).unwrap().items[0]
+            .reason
+            .as_deref(),
         Some("link_updated")
     );
     assert_eq!(store.push_status().unwrap().requests_24h, 0);
@@ -267,7 +269,10 @@ fn event_article_and_account_commit_atomically_and_never_touch_sessions() {
     connection.execute_batch("CREATE TRIGGER fail_push_log BEFORE INSERT ON app_log WHEN NEW.stage='push_monitor' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
     assert!(store.push_import(id, candidate, &meta, now()).is_err());
     assert!(store.list_accounts().unwrap().is_empty());
-    assert_eq!(store.push_status().unwrap().events[0].outcome, "fetching");
+    assert_eq!(
+        store.push_events(None, 100).unwrap().items[0].outcome,
+        "fetching"
+    );
     connection
         .execute_batch("DROP TRIGGER fail_push_log")
         .unwrap();
@@ -303,10 +308,13 @@ fn across_accounts_imports_are_distinct_and_preexisting_articles_are_reused() {
     store.push_claim(id, candidate).unwrap();
     store.push_import(id, candidate, &a, now()).unwrap();
     assert_eq!(
-        store.push_status().unwrap().events[0].article_id,
+        store.push_events(None, 100).unwrap().items[0].article_id,
         Some(article)
     );
-    assert_eq!(store.push_status().unwrap().events[0].outcome, "existing");
+    assert_eq!(
+        store.push_events(None, 100).unwrap().items[0].outcome,
+        "existing"
+    );
     store
         .push_scanned(
             id,
@@ -338,7 +346,10 @@ fn deleted_accounts_and_outside_window_are_not_recreated() {
     store.push_claim(id, candidate).unwrap();
     meta.published_at -= 25 * 3600;
     store.push_import(id, candidate, &meta, now()).unwrap();
-    assert_eq!(store.push_status().unwrap().events[0].outcome, "ignored");
+    assert_eq!(
+        store.push_events(None, 100).unwrap().items[0].outcome,
+        "ignored"
+    );
     assert!(store.list_accounts().unwrap().is_empty());
     let (store, id, candidate) = setup(Config::default());
     meta.published_at = now() as i64;
@@ -350,7 +361,10 @@ fn deleted_accounts_and_outside_window_are_not_recreated() {
         .unwrap();
     store.push_claim(id, candidate).unwrap();
     store.push_import(id, candidate, &meta, now()).unwrap();
-    assert_eq!(store.push_status().unwrap().events[0].outcome, "ignored");
+    assert_eq!(
+        store.push_events(None, 100).unwrap().items[0].outcome,
+        "ignored"
+    );
     assert!(store.list_articles(None, 10, 0, false).unwrap().is_empty());
 }
 
@@ -568,7 +582,7 @@ async fn redirect_to_other_domain_or_other_known_article_never_gets_followed() {
         assert_eq!(store.push_status().unwrap().requests_24h, 1);
         assert!(store.push_next(id, now()).unwrap().is_none());
         assert_eq!(
-            store.push_status().unwrap().events[0].outcome,
+            store.push_events(None, 100).unwrap().items[0].outcome,
             "redirect_rejected"
         );
     }
@@ -596,7 +610,7 @@ async fn redirect_loop_stops_after_three_counted_requests() {
     }
     assert_eq!(store.push_status().unwrap().requests_24h, 3);
     assert_eq!(
-        store.push_status().unwrap().events[0].outcome,
+        store.push_events(None, 100).unwrap().items[0].outcome,
         "redirect_limit"
     );
     assert!(store.push_next(id, now()).unwrap().is_none());
@@ -635,7 +649,9 @@ async fn short_redirect_cannot_replace_original_full_article_identity() {
     server.await.unwrap();
     assert!(store.list_accounts().unwrap().is_empty());
     assert_eq!(
-        store.push_status().unwrap().events[0].reason.as_deref(),
+        store.push_events(None, 100).unwrap().items[0]
+            .reason
+            .as_deref(),
         Some("invalid_metadata")
     );
 }
@@ -661,7 +677,9 @@ async fn verification_redirect_is_not_followed_and_retries_after_one_second() {
     server.await.unwrap();
     assert_eq!(store.push_status().unwrap().requests_24h, 1);
     assert_eq!(
-        store.push_status().unwrap().events[0].reason.as_deref(),
+        store.push_events(None, 100).unwrap().items[0]
+            .reason
+            .as_deref(),
         Some("verification_required")
     );
     assert_eq!(store.wb_policy().unwrap().cooldown_until, 0.);
@@ -686,9 +704,17 @@ async fn real_http_failures_retry_soon_without_global_cooldown() {
         let request = server.await.unwrap();
         assert!(request.starts_with("GET /s HTTP/1.1"));
         let status = store.push_status().unwrap();
-        assert_eq!(status.events[0].outcome, expected);
+        assert_eq!(
+            store.push_events(None, 100).unwrap().items[0].outcome,
+            expected
+        );
         assert_eq!(status.requests_24h, 1);
-        if code == 429 || status.events[0].reason.as_deref() == Some("verification_required") {
+        if code == 429
+            || store.push_events(None, 100).unwrap().items[0]
+                .reason
+                .as_deref()
+                == Some("verification_required")
+        {
             assert_eq!(store.wb_policy().unwrap().cooldown_until, 0.);
             assert!(store.push_next(id, now() + 1.1).unwrap().is_some());
         }
@@ -821,7 +847,7 @@ async fn scanner_stop_is_cooperative_and_partial_results_are_discarded() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(store.push_status().unwrap().events.is_empty());
+    assert!(store.push_events(None, 100).unwrap().items.is_empty());
 }
 
 #[test]
@@ -905,7 +931,7 @@ fn configured_article_retry_count_applies_to_push_candidates() {
         .push_result(id, candidate, "network_error", true, now() + 1.)
         .unwrap();
     assert_eq!(
-        store.push_status().unwrap().events[0].outcome,
+        store.push_events(None, 100).unwrap().items[0].outcome,
         "network_error"
     );
     assert_eq!(store.push_status().unwrap().pending, 0);
@@ -959,7 +985,7 @@ fn reducing_retry_setting_prevents_next_unsent_attempt() {
     store.wb_set_policy(policy).unwrap();
     assert!(!store.push_claim(id, candidate).unwrap());
     assert_eq!(
-        store.push_status().unwrap().events[0].outcome,
+        store.push_events(None, 100).unwrap().items[0].outcome,
         "retry_limit"
     );
 }

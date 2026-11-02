@@ -97,7 +97,6 @@ pub struct Status {
     pub imported: i64,
     pub requests_24h: i64,
     pub daily_budget: i64,
-    pub events: Vec<MonitorEvent>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventCursor {
