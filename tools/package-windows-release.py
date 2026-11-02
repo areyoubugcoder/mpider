@@ -21,6 +21,7 @@ PUBLIC_DOCUMENTS = (
     "docs/faq.md",
     "docs/laboratory.md",
     "docs/request-policy.md",
+    "docs/push-monitor.md",
     "docs/advertisements.md",
     "docs/article-export.md",
     "docs/source-deletion.md",
