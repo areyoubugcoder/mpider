@@ -1,7 +1,8 @@
 //! 推送候选、事件与文章提交同事务；运行世代挡住停止/重启后的晚到结果。
 use super::*;
 use crate::workbench::push_monitor::{
-    Candidate, Config, Metadata, MonitorEvent, Run, Scan, Status, MAX_CANDIDATES, PURPOSE,
+    Candidate, Config, EventCursor, EventPage, Metadata, MonitorEvent, Run, Scan, Status,
+    MAX_CANDIDATES,
 };
 use anyhow::{ensure, Context};
 use rusqlite::Transaction;
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS push_candidates(
  article_id INTEGER,reason TEXT
 );
 CREATE INDEX IF NOT EXISTS push_pending ON push_candidates(state,retry_at,id);
+CREATE INDEX IF NOT EXISTS push_discovered_time ON push_candidates(first_seen_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS push_event_time ON push_candidates(COALESCE(finished_at,first_seen_at) DESC,id DESC);
 CREATE INDEX IF NOT EXISTS push_request_budget ON wb_requests(json_extract(document,'$.purpose'),json_extract(document,'$.started_at'));
 "#;
@@ -34,6 +36,18 @@ fn run_from(conn: &Connection) -> Result<Run> {
 fn save(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     tx.execute("INSERT INTO push_monitor VALUES(1,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document", [serde_json::to_string(run)?])?;
     Ok(())
+}
+fn request_limit(conn: &Connection) -> Result<u32> {
+    let text: Option<String> = conn
+        .query_row("SELECT document FROM wb_policy WHERE id=1", [], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let policy: crate::workbench::Policy = text
+        .map(|text| serde_json::from_str(&text))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(policy.retries + 1)
 }
 fn active(tx: &Transaction<'_>, id: i64) -> Result<bool> {
     let r = run_from(tx)?;
@@ -134,6 +148,7 @@ impl Store {
         if run.rounds.is_multiple_of(30) {
             tx.execute("DELETE FROM push_candidates WHERE state NOT IN ('pending','fetching') AND finished_at<?", [ts-30.*86400.])?;
         }
+        let max_attempts = request_limit(&tx)?;
         let mut remaining = MAX_CANDIDATES.saturating_sub(tx.query_row(
             "SELECT COUNT(*) FROM push_candidates WHERE state IN ('pending','fetching')",
             [],
@@ -173,7 +188,7 @@ impl Store {
                         continue;
                     }
                     // 同一文章补齐签名后重排失败候选；既有入库结果和已发送次数保留。
-                    let changed=tx.execute("UPDATE push_candidates SET url=?,state='pending',reason='link_updated',retry_at=0,finished_at=NULL WHERE id=? AND attempts<3 AND state IN ('pending','http_error','verification_required','invalid_metadata','network_error','redirect_rejected')",params![link.url,candidate])?;
+                    let changed=tx.execute("UPDATE push_candidates SET url=?,state='pending',reason='link_updated',retry_at=0,finished_at=NULL WHERE id=? AND attempts<? AND state IN ('pending','http_error','verification_required','invalid_metadata','network_error','redirect_rejected')",params![link.url,candidate,max_attempts])?;
                     if changed > 0 && state != "pending" {
                         remaining = remaining.saturating_sub(1);
                     }
@@ -226,7 +241,11 @@ impl Store {
         if !active(&tx, id)? {
             return Ok(false);
         }
-        let changed=tx.execute("UPDATE push_candidates SET state='fetching',attempts=attempts+1 WHERE id=? AND state='pending'",[candidate])?;
+        let limit = request_limit(&tx)?;
+        let changed=tx.execute("UPDATE push_candidates SET state='fetching',attempts=attempts+1 WHERE id=? AND state='pending' AND attempts<?",params![candidate,limit])?;
+        if changed == 0 {
+            tx.execute("UPDATE push_candidates SET state='retry_limit',reason='retry_limit',finished_at=? WHERE id=? AND state='pending' AND attempts>=?",params![now(),candidate,limit])?;
+        }
         let mut run = run_from(&tx)?;
         run.next_fetch_at = 0.;
         save(&tx, &run)?;
@@ -264,7 +283,7 @@ impl Store {
             [candidate],
             |r| r.get(0),
         )?;
-        let pending = retry && attempts < 3;
+        let pending = retry && attempts < request_limit(&tx)?;
         tx.execute(
             "UPDATE push_candidates SET state=?,reason=?,retry_at=?,finished_at=? WHERE id=?",
             params![
@@ -292,7 +311,7 @@ impl Store {
             [candidate],
             |r| r.get(0),
         )?;
-        if attempts >= 3 {
+        if attempts >= request_limit(&tx)? {
             terminal(
                 &tx,
                 candidate,
@@ -397,6 +416,16 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+    pub fn push_events(&self, before: Option<EventCursor>, limit: i64) -> Result<EventPage> {
+        ensure!((1..=100).contains(&limit), "分页条数须为 1 至 100");
+        if let Some(cursor) = &before {
+            ensure!(
+                cursor.first_seen_at.is_finite() && cursor.first_seen_at > 0. && cursor.id > 0,
+                "发现记录游标无效"
+            );
+        }
+        event_page(&self.conn(), before.as_ref(), limit, now())
+    }
     pub fn push_status(&self) -> Result<Status> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -411,10 +440,44 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        let requests_hour=tx.query_row("SELECT COUNT(*) FROM wb_requests WHERE json_extract(document,'$.purpose')=? AND json_extract(document,'$.started_at')>?",params![PURPOSE,now()-3600.],|r|r.get(0))?;
-        let events = {
-            let mut q=tx.prepare("SELECT id,first_seen_at,finished_at,state,nickname,title,biz,article_id,published_at,reason FROM push_candidates ORDER BY COALESCE(finished_at,first_seen_at) DESC,id DESC LIMIT 100")?;
-            let rows = q.query_map([], |r| {
+        let requests_24h = super::workbench::article_window(&tx, now() - 86400.)?.0;
+        let daily_budget: Option<i64> = tx
+            .query_row(
+                "SELECT json_extract(document,'$.body_daily_budget') FROM wb_policy WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let daily_budget =
+            daily_budget.unwrap_or(crate::workbench::Policy::default().body_daily_budget);
+        let events = event_page(&tx, None, 20, now())?.items;
+        tx.commit()?;
+        Ok(Status {
+            supported: cfg!(windows),
+            run,
+            pending,
+            imported,
+            requests_24h,
+            daily_budget,
+            events,
+        })
+    }
+}
+
+fn event_page(
+    conn: &Connection,
+    before: Option<&EventCursor>,
+    limit: i64,
+    ts: f64,
+) -> Result<EventPage> {
+    let cursor_time = before.map_or(f64::MAX, |c| c.first_seen_at);
+    let cursor_id = before.map_or(i64::MAX, |c| c.id);
+    let mut q=conn.prepare("SELECT id,first_seen_at,finished_at,state,nickname,title,biz,article_id,published_at,reason FROM push_candidates WHERE first_seen_at>=?1 AND first_seen_at<=?2 AND (first_seen_at<?3 OR (first_seen_at=?3 AND id<?4)) ORDER BY first_seen_at DESC,id DESC LIMIT ?5")?;
+    let mut items = q
+        .query_map(
+            params![ts - 3600., ts, cursor_time, cursor_id, limit + 1],
+            |r| {
                 Ok(MonitorEvent {
                     id: r.get(0)?,
                     first_seen_at: r.get(1)?,
@@ -427,17 +490,18 @@ impl Store {
                     published_at: r.get(8)?,
                     reason: r.get(9)?,
                 })
-            })?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        tx.commit()?;
-        Ok(Status {
-            supported: cfg!(windows),
-            run,
-            pending,
-            imported,
-            requests_hour,
-            events,
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let more = items.len() > limit as usize;
+    items.truncate(limit as usize);
+    let next_cursor = if more {
+        items.last().map(|e| EventCursor {
+            first_seen_at: e.first_seen_at,
+            id: e.id,
         })
-    }
+    } else {
+        None
+    };
+    Ok(EventPage { items, next_cursor })
 }

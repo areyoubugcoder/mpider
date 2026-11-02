@@ -26,17 +26,17 @@ async fn main() -> Result<()> {
         }
         ensure!(
             args.len() == 5 && args[1] == "run",
-            "用法：push_monitor scan | push_monitor run <独立数据库> <秒数> <每小时网页上限>"
+            "用法：push_monitor scan | push_monitor run <独立数据库> <秒数> <近24小时文章预算>"
         );
         let seconds: u64 = args[3].parse()?;
         let budget: i64 = args[4].parse()?;
         ensure!((1..=3600).contains(&seconds), "诊断时长须为 1 至 3600 秒");
         let store = std::sync::Arc::new(Store::open(std::path::Path::new(&args[2]))?);
         store.push_restart()?;
-        let id = store.push_start(Config {
-            hourly_budget: budget,
-            ..Default::default()
-        })?;
+        let mut policy = store.wb_policy()?;
+        policy.body_daily_budget = budget;
+        store.wb_set_policy(policy)?;
+        let id = store.push_start(Config::default())?;
         let runner = tokio::spawn(push_monitor::run(store.clone(), id));
         let until = tokio::time::Instant::now() + std::time::Duration::from_secs(seconds);
         loop {
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
             // 不向终端输出文章 URL、内存片段、正文或会话信息。
             println!(
                 "{}",
-                serde_json::json!({"run_id":id,"active":status.run.active,"phase":status.run.phase,"rounds":status.run.rounds,"processes":status.run.processes,"read_bytes":status.run.read_bytes,"pending":status.pending,"imported":status.imported,"requests_hour":status.requests_hour,"reason":status.run.reason})
+                serde_json::json!({"run_id":id,"active":status.run.active,"phase":status.run.phase,"rounds":status.run.rounds,"processes":status.run.processes,"read_bytes":status.run.read_bytes,"pending":status.pending,"imported":status.imported,"requests_24h":status.requests_24h,"reason":status.run.reason})
             );
             if tokio::time::Instant::now() >= until || !status.run.active {
                 break;

@@ -31,8 +31,6 @@ const MAX_HTML: usize = 8 * 1024 * 1024;
 pub struct Config {
     pub scan_seconds: u64,
     pub recent_hours: u64,
-    pub hourly_budget: i64,
-    pub fetch_seconds: u64,
     /// 空集合表示全部公众号；使用稳定 biz，不按显示名称匹配。
     pub bizzes: Vec<String>,
 }
@@ -41,8 +39,6 @@ impl Default for Config {
         Self {
             scan_seconds: 10,
             recent_hours: 24,
-            hourly_budget: 3600,
-            fetch_seconds: 1,
             bizzes: vec![],
         }
     }
@@ -56,14 +52,6 @@ impl Config {
         ensure!(
             (1..=168).contains(&self.recent_hours),
             "文章时间窗须为 1 至 168 小时"
-        );
-        ensure!(
-            (1..=3600).contains(&self.hourly_budget),
-            "每小时网页请求上限须为 1 至 3600"
-        );
-        ensure!(
-            (1..=60).contains(&self.fetch_seconds),
-            "网页请求间隔须为 1 至 60 秒"
         );
         ensure!(
             self.bizzes.len() <= 1000 && self.bizzes.iter().all(|b| valid_biz(b)),
@@ -107,9 +95,21 @@ pub struct Status {
     pub run: Run,
     pub pending: i64,
     pub imported: i64,
-    pub requests_hour: i64,
+    pub requests_24h: i64,
+    pub daily_budget: i64,
     pub events: Vec<MonitorEvent>,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EventCursor {
+    pub first_seen_at: f64,
+    pub id: i64,
+}
+#[derive(Serialize)]
+pub struct EventPage {
+    pub items: Vec<MonitorEvent>,
+    pub next_cursor: Option<EventCursor>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Link {
     pub key: String,

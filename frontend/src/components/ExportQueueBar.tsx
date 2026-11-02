@@ -1,4 +1,4 @@
-/** 与正文下载共用底栏进度样式；仅在实际导出期间显示。 */
+/** 与文章下载共用底栏进度样式；仅在实际导出期间显示。 */
 import { useState, useSyncExternalStore } from "react";
 import { QueueProgressTrigger } from "@/components/QueueProgressTrigger";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";

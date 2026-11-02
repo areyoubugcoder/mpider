@@ -19,6 +19,7 @@ pub struct Policy {
     pub list_max_ms: u64,
     pub list_daily_budget: i64,
     pub body_gap_ms: u64,
+    pub body_daily_budget: i64,
     pub image_gap_ms: u64,
     pub body_workers: usize,
     pub image_workers: usize,
@@ -35,6 +36,7 @@ impl Default for Policy {
             list_max_ms: 120000,
             list_daily_budget: 60,
             body_gap_ms: 1000,
+            body_daily_budget: 86400,
             image_gap_ms: 1000,
             body_workers: 4,
             image_workers: 4,
@@ -56,6 +58,7 @@ impl Policy {
             "请求间隔不能超过一天"
         );
         ensure!(self.list_daily_budget > 0, "列表预算须为正数");
+        ensure!(self.body_daily_budget > 0, "文章下载预算须为正数");
         ensure!(
             (1..=12).contains(&self.body_workers) && (1..=12).contains(&self.image_workers),
             "并发须为 1 至 12"
@@ -326,6 +329,7 @@ pub struct Snapshot {
     pub requests: Vec<RequestEvent>,
     pub policy: Policy,
     pub list_calls_24h: i64,
+    pub article_calls_24h: i64,
     pub archives: Vec<ArchiveRecord>,
     pub download_queue: DownloadQueue,
 }

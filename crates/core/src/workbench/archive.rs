@@ -494,7 +494,7 @@ fn write_manifest(dir: &Path) -> Result<()> {
 
 /// 阅读接口仅接受文章 ID；内联已归档图片，不授予 WebView 任意磁盘访问权限。
 pub fn reader_html(store: &Store, root: &Path, id: i64) -> Result<String> {
-    let record = store.wb_archive(id)?.context("请先下载正文")?;
+    let record = store.wb_archive(id)?.context("请先下载文章")?;
     let dir = root
         .join("archive/articles")
         .join(id.to_string())

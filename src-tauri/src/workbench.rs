@@ -18,6 +18,17 @@ pub fn workbench_push_status(
     state.store.push_status().map_err(|e| e.to_string())
 }
 #[tauri::command]
+pub fn workbench_push_events(
+    state: State<'_, AppState>,
+    before: Option<core::push_monitor::EventCursor>,
+    limit: Option<i64>,
+) -> Result<core::push_monitor::EventPage, String> {
+    state
+        .store
+        .push_events(before, limit.unwrap_or(20))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 pub fn workbench_push_start(
     state: State<'_, AppState>,
     config: core::push_monitor::Config,

@@ -5,7 +5,7 @@ export const SYSTEM_LOG_MODULE_LABELS: Record<string, string> = {
   push_monitor: "推送监测",
   history: "文章采集",
   experiment: "游标实验",
-  archive: "正文下载",
+  archive: "文章下载",
   export: "数据导出",
   storage: "数据存储",
   policy: "请求策略",

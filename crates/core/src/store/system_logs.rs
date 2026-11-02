@@ -88,6 +88,7 @@ fn safe_context(value: Value) -> Value {
         "list_max_ms",
         "list_daily_budget",
         "body_gap_ms",
+        "body_daily_budget",
         "image_gap_ms",
         "cooldown_until",
         "scheduled_at",

@@ -111,17 +111,21 @@ fn long_checksum_survives_discovery_and_requeues_failed_candidate_without_resett
         store.push_status().unwrap().events[0].reason.as_deref(),
         Some("link_updated")
     );
-    assert_eq!(store.push_status().unwrap().requests_hour, 0);
+    assert_eq!(store.push_status().unwrap().requests_24h, 0);
 }
 
 #[test]
-fn old_config_gets_one_second_interval_and_new_default_budget_is_3600() {
-    let config: Config = serde_json::from_str(r#"{"hourly_budget":18}"#).unwrap();
-    assert_eq!(config.fetch_seconds, 1);
-    assert_eq!(config.hourly_budget, 18);
-    assert_eq!(Config::default().hourly_budget, 3600);
-    assert!(Config {
-        fetch_seconds: 0,
+fn legacy_monitor_config_drops_local_limits_and_policy_gets_daily_budget() {
+    let config: Config =
+        serde_json::from_str(r#"{"hourly_budget":18,"fetch_seconds":30}"#).unwrap();
+    let value = serde_json::to_value(config).unwrap();
+    assert!(value.get("hourly_budget").is_none());
+    assert!(value.get("fetch_seconds").is_none());
+    let policy: crate::workbench::Policy = serde_json::from_str(r#"{"body_gap_ms":2500}"#).unwrap();
+    assert_eq!(policy.body_gap_ms, 2500);
+    assert_eq!(policy.body_daily_budget, 86400);
+    assert!(crate::workbench::Policy {
+        body_daily_budget: 0,
         ..Default::default()
     }
     .validate()
@@ -177,7 +181,7 @@ async fn queued_webpage_is_fetched_while_memory_scan_is_still_running() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(store.push_status().unwrap().requests_24h, 1);
 }
 
 #[test]
@@ -350,61 +354,90 @@ fn deleted_accounts_and_outside_window_are_not_recreated() {
     assert!(store.list_articles(None, 10, 0, false).unwrap().is_empty());
 }
 
+fn article_budget(store: &Store, budget: i64) {
+    let mut policy = store.wb_policy().unwrap();
+    policy.body_daily_budget = budget;
+    store.wb_set_policy(policy).unwrap();
+}
 #[test]
-fn hourly_budget_survives_runs_and_webpage_rate_is_independent() {
-    let (store, id, _) = setup(Config {
-        hourly_budget: 1,
-        ..Default::default()
-    });
+fn article_daily_budget_survives_runs_and_is_shared_with_downloads() {
+    let (store, id, _) = setup(Config::default());
+    article_budget(&store, 1);
     let ts = now();
-    let permit = store
+    assert!(store
         .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts)
-        .unwrap();
-    assert!(permit.request_id.is_some());
+        .unwrap()
+        .request_id
+        .is_some());
     store.push_end(id, "stopped", None).unwrap();
-    let second = store
-        .push_start(Config {
-            hourly_budget: 1,
-            ..Default::default()
-        })
+    let next = store.push_start(Config::default()).unwrap();
+    for category in [CATEGORY, "body"] {
+        let purpose = if category == CATEGORY {
+            PURPOSE
+        } else {
+            "archive"
+        };
+        let denied = store
+            .wb_request_permit(category, purpose, next, "FAKE_A", ts + 3601.)
+            .unwrap();
+        assert!(denied.request_id.is_none());
+        assert!(denied.next_at >= ts + 86400.);
+    }
+    assert!(store
+        .wb_request_permit(CATEGORY, PURPOSE, next, "FAKE_A", ts + 86401.)
+        .unwrap()
+        .request_id
+        .is_some());
+}
+#[test]
+fn article_interval_is_shared_and_live_policy_change_releases_waiting_monitor() {
+    let (store, id, _) = setup(Config::default());
+    let mut policy = store.wb_policy().unwrap();
+    policy.body_gap_ms = 30000;
+    policy.body_daily_budget = 2;
+    store.wb_set_policy(policy).unwrap();
+    let ts = now();
+    store
+        .wb_request_permit("body", "archive", 1, "FAKE_A", ts)
         .unwrap();
     let denied = store
-        .wb_request_permit(CATEGORY, PURPOSE, second, "FAKE_A", ts + 5.)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 1.)
         .unwrap();
     assert!(denied.request_id.is_none());
-    assert!(denied.next_at >= ts + 3600.);
-    let (store, id, _) = setup(Config::default());
-    let mut p = store.wb_policy().unwrap();
-    p.body_gap_ms = 30_000;
-    store.wb_set_policy(p).unwrap();
+    assert_eq!(denied.next_at, ts + 30.);
+    assert!(store
+        .wb_request_permit("list", "history", 1, "FAKE_A", ts + 1.)
+        .unwrap()
+        .request_id
+        .is_some());
+    assert!(store
+        .wb_request_permit("image", "archive", 1, "FAKE_A", ts + 1.)
+        .unwrap()
+        .request_id
+        .is_some());
     store
-        .wb_request_permit("body", "archive", 777, "FAKE_A", ts)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 30.)
         .unwrap();
+    let denied = store
+        .wb_request_permit("body", "archive", 1, "FAKE_A", ts + 60.)
+        .unwrap();
+    assert!(denied.request_id.is_none());
+    assert!(denied.next_at >= ts + 86400.);
+    store
+        .push_deferred(id, denied.next_at, denied.reason.as_deref())
+        .unwrap();
+    let mut policy = store.wb_policy().unwrap();
+    policy.body_gap_ms = 5000;
+    policy.body_daily_budget = 3;
+    store.wb_set_policy(policy).unwrap();
+    assert_eq!(store.push_run().unwrap().next_fetch_at, 0.);
     assert!(store
-        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 0.1)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 35.)
         .unwrap()
         .request_id
         .is_some());
-    let early = store
-        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 0.9)
-        .unwrap();
-    assert!(early.request_id.is_none());
-    assert!((early.next_at - (ts + 1.1)).abs() < 0.001);
-    let body = store
-        .wb_request_permit("body", "archive", 777, "FAKE_A", ts + 1.)
-        .unwrap();
-    assert!((body.next_at - (ts + 30.)).abs() < 0.001);
-    store.wb_cooldown(ts + 7200.).unwrap();
-    assert!(store
-        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 1.1)
-        .unwrap()
-        .request_id
-        .is_some());
-    assert!(store
-        .wb_request_permit("body", "archive", 777, "FAKE_A", ts + 31.)
-        .unwrap()
-        .request_id
-        .is_none());
+    assert_eq!(store.wb_article_window(ts - 1.).unwrap().0, 3);
+    assert_eq!(store.wb_snapshot().unwrap().article_calls_24h, 3);
 }
 
 async fn fixture(code: u16, body: String) -> (String, tokio::task::JoinHandle<String>) {
@@ -451,7 +484,7 @@ async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
     .await
     .unwrap();
     server.await.unwrap();
-    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(store.push_status().unwrap().requests_24h, 1);
     store
         .push_scanned(
             id,
@@ -471,7 +504,7 @@ async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
         .await
         .unwrap();
     server.await.unwrap();
-    assert_eq!(store.push_status().unwrap().requests_hour, 2);
+    assert_eq!(store.push_status().unwrap().requests_24h, 2);
     assert_eq!(store.push_status().unwrap().imported, 1);
     assert!(store
         .wb_snapshot()
@@ -482,11 +515,9 @@ async fn article_redirect_is_durable_prioritized_and_each_hop_is_counted() {
 }
 
 #[tokio::test]
-async fn redirect_waits_for_hourly_budget_after_reopen_without_hidden_http() {
-    let (store, id, _) = setup(Config {
-        hourly_budget: 1,
-        ..Default::default()
-    });
+async fn redirect_waits_for_daily_article_budget_after_reopen_without_hidden_http() {
+    let (store, id, _) = setup(Config::default());
+    article_budget(&store, 1);
     let (endpoint, server) =
         fixture_with_location(302, String::new(), Some(link("FAKE_A").url)).await;
     process_at(
@@ -500,12 +531,7 @@ async fn redirect_waits_for_hourly_budget_after_reopen_without_hidden_http() {
     .unwrap();
     server.await.unwrap();
     store.push_restart().unwrap();
-    let next_run = store
-        .push_start(Config {
-            hourly_budget: 1,
-            ..Default::default()
-        })
-        .unwrap();
+    let next_run = store.push_start(Config::default()).unwrap();
     let candidate = store.push_next(next_run, now()).unwrap().unwrap();
     process_at(
         &store,
@@ -516,9 +542,9 @@ async fn redirect_waits_for_hourly_budget_after_reopen_without_hidden_http() {
     )
     .await
     .unwrap();
-    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(store.push_status().unwrap().requests_24h, 1);
     assert_eq!(store.push_status().unwrap().pending, 1);
-    assert!(store.push_run().unwrap().next_fetch_at > now() + 3500.);
+    assert!(store.push_run().unwrap().next_fetch_at > now() + 86300.);
 }
 
 #[tokio::test]
@@ -539,7 +565,7 @@ async fn redirect_to_other_domain_or_other_known_article_never_gets_followed() {
         .await
         .unwrap();
         server.await.unwrap();
-        assert_eq!(store.push_status().unwrap().requests_hour, 1);
+        assert_eq!(store.push_status().unwrap().requests_24h, 1);
         assert!(store.push_next(id, now()).unwrap().is_none());
         assert_eq!(
             store.push_status().unwrap().events[0].outcome,
@@ -568,7 +594,7 @@ async fn redirect_loop_stops_after_three_counted_requests() {
         .unwrap();
         server.await.unwrap();
     }
-    assert_eq!(store.push_status().unwrap().requests_hour, 3);
+    assert_eq!(store.push_status().unwrap().requests_24h, 3);
     assert_eq!(
         store.push_status().unwrap().events[0].outcome,
         "redirect_limit"
@@ -633,7 +659,7 @@ async fn verification_redirect_is_not_followed_and_retries_after_one_second() {
     .await
     .unwrap();
     server.await.unwrap();
-    assert_eq!(store.push_status().unwrap().requests_hour, 1);
+    assert_eq!(store.push_status().unwrap().requests_24h, 1);
     assert_eq!(
         store.push_status().unwrap().events[0].reason.as_deref(),
         Some("verification_required")
@@ -661,7 +687,7 @@ async fn real_http_failures_retry_soon_without_global_cooldown() {
         assert!(request.starts_with("GET /s HTTP/1.1"));
         let status = store.push_status().unwrap();
         assert_eq!(status.events[0].outcome, expected);
-        assert_eq!(status.requests_hour, 1);
+        assert_eq!(status.requests_24h, 1);
         if code == 429 || status.events[0].reason.as_deref() == Some("verification_required") {
             assert_eq!(store.wb_policy().unwrap().cooldown_until, 0.);
             assert!(store.push_next(id, now() + 1.1).unwrap().is_some());
@@ -706,12 +732,8 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
     ));
     {
         let store = Store::open(&path).unwrap();
-        let id = store
-            .push_start(Config {
-                hourly_budget: 1,
-                ..Default::default()
-            })
-            .unwrap();
+        article_budget(&store, 1);
+        let id = store.push_start(Config::default()).unwrap();
         store
             .push_scanned(
                 id,
@@ -732,12 +754,7 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
         let store = Store::open(&path).unwrap();
         store.push_restart().unwrap();
         assert!(!store.push_status().unwrap().run.active);
-        let id = store
-            .push_start(Config {
-                hourly_budget: 1,
-                ..Default::default()
-            })
-            .unwrap();
+        let id = store.push_start(Config::default()).unwrap();
         assert_eq!(store.push_next(id, now()).unwrap().unwrap().attempts, 1);
         assert!(store
             .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", now())
@@ -805,4 +822,144 @@ async fn scanner_stop_is_cooperative_and_partial_results_are_discarded() {
         .unwrap()
         .unwrap();
     assert!(store.push_status().unwrap().events.is_empty());
+}
+
+#[test]
+fn recent_discoveries_are_hour_bounded_and_keyset_pages_do_not_skip_or_repeat() {
+    let store = Store::open_in_memory().unwrap();
+    let id = store.push_start(Config::default()).unwrap();
+    let ts = now();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![link("OLD")],
+                ..Default::default()
+            },
+            ts - 7200.,
+        )
+        .unwrap();
+    let old = store.push_next(id, ts).unwrap().unwrap().id;
+    store.push_claim(id, old).unwrap();
+    // 即使旧记录刚刚处理完成，也不能重新进入最近一小时的发现列表。
+    store
+        .push_result(id, old, "unavailable", false, 0.)
+        .unwrap();
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: (0..110).map(|i| link(&format!("FAKE_{i}"))).collect(),
+                ..Default::default()
+            },
+            ts - 20.,
+        )
+        .unwrap();
+    let first = store.push_events(None, 20).unwrap();
+    assert_eq!(first.items.len(), 20);
+    assert!(first.items.iter().all(|e| e.id != old));
+    let mut ids: Vec<i64> = first.items.iter().map(|e| e.id).collect();
+    let mut cursor = first.next_cursor;
+    // 翻页期间出现新记录，后续页仍沿第一次返回的游标继续。
+    store
+        .push_scanned(
+            id,
+            Scan {
+                links: vec![link("NEW")],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    while let Some(before) = cursor {
+        let page = store.push_events(Some(before), 20).unwrap();
+        ids.extend(page.items.iter().map(|e| e.id));
+        cursor = page.next_cursor;
+    }
+    assert_eq!(ids.len(), 110);
+    assert_eq!(
+        ids.iter().collect::<std::collections::HashSet<_>>().len(),
+        110
+    );
+    assert_eq!(store.push_events(None, 20).unwrap().items[0].biz, "NEW");
+    assert!(store.push_events(None, 0).is_err());
+    assert!(store
+        .push_events(
+            Some(EventCursor {
+                first_seen_at: f64::NAN,
+                id: 1
+            }),
+            20
+        )
+        .is_err());
+}
+
+#[test]
+fn configured_article_retry_count_applies_to_push_candidates() {
+    let (store, id, candidate) = setup(Config::default());
+    let mut policy = store.wb_policy().unwrap();
+    policy.retries = 0;
+    store.wb_set_policy(policy).unwrap();
+    store.push_claim(id, candidate).unwrap();
+    store
+        .push_result(id, candidate, "network_error", true, now() + 1.)
+        .unwrap();
+    assert_eq!(
+        store.push_status().unwrap().events[0].outcome,
+        "network_error"
+    );
+    assert_eq!(store.push_status().unwrap().pending, 0);
+}
+
+#[test]
+fn concurrent_article_permits_cannot_overspend_shared_daily_budget() {
+    let (store, id, _) = setup(Config::default());
+    article_budget(&store, 1);
+    let mut policy = store.wb_policy().unwrap();
+    policy.body_gap_ms = 0;
+    store.wb_set_policy(policy).unwrap();
+    let store = Arc::new(store);
+    let handles: Vec<_> = (0..8)
+        .map(|i| {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let (category, purpose) = if i % 2 == 0 {
+                    (CATEGORY, PURPOSE)
+                } else {
+                    ("body", "archive")
+                };
+                store
+                    .wb_request_permit(category, purpose, id, "FAKE_A", now())
+                    .unwrap()
+                    .request_id
+                    .is_some()
+            })
+        })
+        .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|allowed| *allowed)
+            .count(),
+        1
+    );
+    assert_eq!(store.wb_article_window(now() - 86400.).unwrap().0, 1);
+}
+
+#[test]
+fn reducing_retry_setting_prevents_next_unsent_attempt() {
+    let (store, id, candidate) = setup(Config::default());
+    store.push_claim(id, candidate).unwrap();
+    store
+        .push_result(id, candidate, "network_error", true, 0.)
+        .unwrap();
+    let mut policy = store.wb_policy().unwrap();
+    policy.retries = 0;
+    store.wb_set_policy(policy).unwrap();
+    assert!(!store.push_claim(id, candidate).unwrap());
+    assert_eq!(
+        store.push_status().unwrap().events[0].outcome,
+        "retry_limit"
+    );
 }

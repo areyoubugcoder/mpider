@@ -2605,6 +2605,7 @@ pub fn run() {
             updater::update_install,
             workbench::workbench_snapshot,
             workbench::workbench_push_status,
+            workbench::workbench_push_events,
             workbench::workbench_push_start,
             workbench::workbench_push_stop,
             workbench::workbench_article_body_states,

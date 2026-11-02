@@ -24,7 +24,7 @@ const fields: Record<string, string> = {
   received_articles: "返回篇数", new_articles: "新入库篇数", pages: "页数", completed: "已处理篇数", failed: "失败数", skipped: "跳过数", partial: "缺图数",
   requested: "申请篇数", queued: "入队篇数", already_downloaded: "已有正文", already_queued: "已在队列", duration_ms: "耗时（毫秒）", outcome: "结果", state: "状态", previous_state: "原状态",
   purpose: "请求用途", category: "请求类别", policy_version: "策略版本", http_status: "HTTP 状态", business_ret: "业务返回码", outer_ret: "外层返回码",
-  list_min_ms: "列表最小间隔（毫秒）", list_max_ms: "列表最大间隔（毫秒）", list_daily_budget: "每日列表预算", body_gap_ms: "正文间隔（毫秒）", image_gap_ms: "图片间隔（毫秒）", cooldown_until: "冷却截止时间", scheduled_at: "计划时间", role: "验证角色", count: "数量", format: "文件格式", reason_code: "原因分类", is_end: "到达末页", source_page: "响应页码",
+  list_min_ms: "列表最小间隔（毫秒）", list_max_ms: "列表最大间隔（毫秒）", list_daily_budget: "每日列表预算", body_gap_ms: "文章下载间隔（毫秒）", body_daily_budget: "近24小时文章下载预算", image_gap_ms: "图片间隔（毫秒）", cooldown_until: "冷却截止时间", scheduled_at: "计划时间", role: "验证角色", count: "数量", format: "文件格式", reason_code: "原因分类", is_end: "到达末页", source_page: "响应页码",
 };
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 function dateInput(time: number) {
