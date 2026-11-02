@@ -270,3 +270,102 @@ async fn download_tasks_run_fifo_repeated_clicks_never_refetch_or_create_auto_zi
     server.abort();
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn concurrent_first_requests_are_immediate_and_next_wave_waits_after_http_completion() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let signal = release.clone();
+    let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let signal = signal.clone();
+            let sent = sent.clone();
+            tokio::spawn(async move {
+                let mut input = [0; 8192];
+                let _ = stream.read(&mut input).await.unwrap();
+                sent.send(now()).unwrap();
+                signal.acquire().await.unwrap().forget();
+                let body =
+                    b"<html><head><meta property=\"og:title\" content=\"synthetic timing article\"></head><body><div id=\"js_content\" class=\"rich_media_content\"><p>synthetic timing article</p></div></body></html>";
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes()).await;
+                let _ = stream.write_all(body).await;
+            });
+        }
+    });
+    let (store, first, old, root) = setup(&format!("http://{addr}/body/1"));
+    store.wb_task_state(old, "cancelled", None).unwrap();
+    let mut p = store.wb_policy().unwrap();
+    p.body_workers = 2;
+    p.body_gap_ms = 3000;
+    store.wb_set_policy(p).unwrap();
+    let mut ids = vec![first];
+    for i in 2..=4 {
+        ids.push(
+            store
+                .upsert_article(
+                    "SYNTHETIC",
+                    &i.to_string(),
+                    1,
+                    &ArticleFields {
+                        content_url: Some(format!("http://{addr}/body/{i}")),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+        );
+    }
+    let task = store.wb_download_enqueue(ids).unwrap().task_id.unwrap();
+    let started = now();
+    let engine = tokio::spawn(run(store.clone(), root.clone()));
+    // 两个工作位无需预先等3秒，且首波请求未响应时不会开始第三个。
+    for _ in 0..2 {
+        let at = tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(at - started < 2.);
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), received.recv())
+            .await
+            .is_err()
+    );
+    release.add_permits(2);
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(6), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    release.add_permits(2);
+    tokio::time::timeout(Duration::from_secs(4), async {
+        while store.wb_task(task).unwrap().state != "done" {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut events = store.wb_requests(0.).unwrap();
+    events.sort_by(|a, b| a.started_at.total_cmp(&b.started_at));
+    assert_eq!(events.len(), 4);
+    for slot in 0..2 {
+        let calls: Vec<_> = events
+            .iter()
+            .filter(|e| e.detail["worker_slot"] == slot)
+            .collect();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[1].started_at >= calls[0].finished_at.unwrap() + 3.);
+        assert_eq!(calls[1].outcome, "ok");
+    }
+    engine.abort();
+    let _ = engine.await;
+    server.abort();
+    let _ = std::fs::remove_dir_all(root);
+}

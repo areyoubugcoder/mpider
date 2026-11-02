@@ -553,8 +553,9 @@ async fn process_at(
         store.push_deferred(id, permit.next_at, permit.reason.as_deref())?;
         return Ok(());
     };
+    let mut completion = super::request::Completion::new(store, &request_id);
     if !store.push_claim(id, candidate.id)? {
-        store.wb_request_finish(&request_id, "cancelled", serde_json::json!({}), now())?;
+        completion.finish("cancelled", serde_json::json!({}), now())?;
         return Ok(());
     }
     let response = fetch(client, endpoint);
@@ -564,7 +565,7 @@ async fn process_at(
             result = &mut response => break result,
             _ = tokio::time::sleep(Duration::from_millis(200)) => {
                 if !store.push_is_active(id)? {
-                    store.wb_request_finish(&request_id, "cancelled", serde_json::json!({}), now())?;
+                    completion.finish("cancelled", serde_json::json!({}), now())?;
                     return Ok(());
                 }
             }
@@ -580,7 +581,7 @@ async fn process_at(
                 .location
                 .as_deref()
                 .and_then(|location| redirect_target(&link, location));
-            store.wb_request_finish(&request_id,if verification {"verification_required"}else if next.is_some() {"redirect"}else{"http_error"},serde_json::json!({"http_status":page.status,"candidate_id":candidate.id,"redirect_accepted":next.is_some(),"verification_redirect":verification}),now())?;
+            completion.finish(if verification {"verification_required"}else if next.is_some() {"redirect"}else{"http_error"},serde_json::json!({"http_status":page.status,"candidate_id":candidate.id,"redirect_accepted":next.is_some(),"verification_redirect":verification}),now())?;
             if verification {
                 store.push_result(
                     id,
@@ -617,8 +618,7 @@ async fn process_at(
         },
         Err(_) => ("network_error", None, true, None),
     };
-    store.wb_request_finish(
-        &request_id,
+    completion.finish(
         outcome,
         serde_json::json!({"http_status":status,"candidate_id":candidate.id}),
         now(),

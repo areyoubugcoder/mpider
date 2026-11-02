@@ -408,17 +408,23 @@ fn article_interval_is_shared_and_live_policy_change_releases_waiting_monitor() 
     let (store, id, _) = setup(Config::default());
     let mut policy = store.wb_policy().unwrap();
     policy.body_gap_ms = 30000;
+    policy.body_workers = 1;
     policy.body_daily_budget = 2;
     store.wb_set_policy(policy).unwrap();
     let ts = now();
-    store
+    let first = store
         .wb_request_permit("body", "archive", 1, "FAKE_A", ts)
+        .unwrap()
+        .request_id
+        .unwrap();
+    store
+        .wb_request_finish(&first, "ok", json!({}), ts + 2.)
         .unwrap();
     let denied = store
         .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 1.)
         .unwrap();
     assert!(denied.request_id.is_none());
-    assert_eq!(denied.next_at, ts + 30.);
+    assert_eq!(denied.next_at, ts + 32.);
     assert!(store
         .wb_request_permit("list", "history", 1, "FAKE_A", ts + 1.)
         .unwrap()
@@ -429,8 +435,13 @@ fn article_interval_is_shared_and_live_policy_change_releases_waiting_monitor() 
         .unwrap()
         .request_id
         .is_some());
+    let second = store
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 32.)
+        .unwrap()
+        .request_id
+        .unwrap();
     store
-        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 30.)
+        .wb_request_finish(&second, "ok", json!({}), ts + 33.)
         .unwrap();
     let denied = store
         .wb_request_permit("body", "archive", 1, "FAKE_A", ts + 60.)
@@ -446,7 +457,7 @@ fn article_interval_is_shared_and_live_policy_change_releases_waiting_monitor() 
     store.wb_set_policy(policy).unwrap();
     assert_eq!(store.push_run().unwrap().next_fetch_at, 0.);
     assert!(store
-        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 35.)
+        .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 38.)
         .unwrap()
         .request_id
         .is_some());

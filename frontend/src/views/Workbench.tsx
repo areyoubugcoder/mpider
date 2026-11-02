@@ -214,7 +214,7 @@ function PolicyForm({ policy }: { policy: Policy }) {
       { key: "list_daily_budget", title: "近24小时列表预算", min: 1 },
       { key: "rebuild_limit", title: "每任务自动重建上限" },
     ] },
-    { title: "文章下载", description: "推送文章解析、文章下载与重试共用文章下载间隔和预算；图片请求单独控制间隔。", fields: [
+    { title: "文章下载", description: "首个文章网页请求立即发送，每个并发工作位在响应结束后等待下载间隔；推送解析与下载共用并发和预算，图片请求单独控制间隔。", fields: [
       { key: "body_gap_ms", title: "文章下载间隔（秒）", seconds: true },
       { key: "image_gap_ms", title: "文章中图片请求间隔（秒）", seconds: true },
       { key: "body_workers", title: "文章下载并发", min: 1 },

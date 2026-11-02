@@ -45,7 +45,7 @@ cargo run --locked -p mpider-core --example push_monitor -- run .\push-test.db 1
 
 ## 本地接口约定
 
-Tauri 提供 `workbench_push_status`、`workbench_push_events({before, limit})`、`workbench_push_start({config})` 和 `workbench_push_stop`。监测配置只包含 `scan_seconds`（5～300）、`recent_hours`（1～168）和 `bizzes`（空集合表示全部）；旧版独立请求间隔及每小时上限字段被忽略。文章预算使用限流策略中的 `body_daily_budget`（正整数），发送间隔使用 `body_gap_ms`。正在运行时不能重复开启；先停止再调整设置。状态返回平台支持性、运行状态、队列和入库计数、共享的近24小时文章请求数及预算；状态接口不读取发现列表，发现记录仅在分页接口按批次读取，不返回内存片段或候选原始 URL。
+Tauri 提供 `workbench_push_status`、`workbench_push_events({before, limit})`、`workbench_push_start({config})` 和 `workbench_push_stop`。监测配置只包含 `scan_seconds`（5～300）、`recent_hours`（1～168）和 `bizzes`（空集合表示全部）；旧版独立请求间隔及每小时上限字段被忽略。文章预算使用限流策略中的 `body_daily_budget`（正整数），请求工作位数量使用 `body_workers`，每个工作位在网页响应结束后按 `body_gap_ms` 等待；首个请求立即发送，与文章下载共享工作位和预算。正在运行时不能重复开启；先停止再调整设置。状态返回平台支持性、运行状态、队列和入库计数、共享的近24小时文章请求数及预算；状态接口不读取发现列表，发现记录仅在分页接口按批次读取，不返回内存片段或候选原始 URL。
 
 发现记录分页按 `(first_seen_at, id)` 降序游标继续，`before` 传上一页的 `next_cursor`；末页返回空游标。`limit` 为 1～100，服务端每次读取均限制在最近一小时。状态与分页均不返回候选原始 URL。
 

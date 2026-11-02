@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 mod home_sync;
 mod pagination;
+mod request_slots;
 mod source_actions;
 mod source_delete;
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS wb_probes(id INTEGER PRIMARY KEY,experiment_id INTEGE
 CREATE TABLE IF NOT EXISTS wb_requests(id TEXT PRIMARY KEY,document TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS wb_request_time ON wb_requests(json_extract(document,'$.started_at'));
 CREATE INDEX IF NOT EXISTS wb_article_request_time ON wb_requests(json_extract(document,'$.started_at')) WHERE json_extract(document,'$.category') IN ('body','webpage');
+CREATE TABLE IF NOT EXISTS wb_article_slots(slot INTEGER PRIMARY KEY,request_id TEXT,finished_at REAL);
 CREATE TABLE IF NOT EXISTS wb_policy(id INTEGER PRIMARY KEY CHECK(id=1),document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_policy_history(version INTEGER PRIMARY KEY,changed_at REAL NOT NULL,document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_archives(article_id INTEGER PRIMARY KEY,document TEXT NOT NULL);
@@ -1589,13 +1591,17 @@ impl Store {
             "body" | "webpage" => p.body_gap_ms,
             _ => p.image_gap_ms,
         };
-        let mut next = last.map_or(ts, |v| v + gap as f64 / 1000.);
+        let (slot, mut next) = if article {
+            request_slots::available(&tx, p.body_workers, gap, ts)?
+        } else {
+            (None, last.map_or(ts, |v| v + gap as f64 / 1000.))
+        };
         if !push {
             next = next.max(p.cooldown_until);
         }
         let mut reason = (next > ts).then(|| {
             if push {
-                "文章下载间隔"
+                "文章请求工作位正在执行或等待完成后的间隔"
             } else {
                 "请求间隔或全局冷却"
             }
@@ -1648,12 +1654,18 @@ impl Store {
             outcome: "pending".into(),
             policy_version: p.version,
             gap_ms: last.map(|v| ((ts - v) * 1000.) as i64),
-            detail: json!({"min_ms":if category=="list"{p.list_min_ms}else{gap},"max_ms":gap}),
+            detail: json!({"min_ms":if category=="list"{p.list_min_ms}else{gap},"max_ms":gap,"worker_slot":slot}),
         };
         tx.execute(
             "INSERT INTO wb_requests VALUES(?,?)",
             params![id, serde_json::to_string(&event)?],
         )?;
+        if let Some(slot) = slot {
+            tx.execute(
+                "UPDATE wb_article_slots SET request_id=? WHERE slot=?",
+                params![id, slot],
+            )?;
+        }
         super::system_logs::write(
             &tx,
             request_module(&event),
@@ -1677,6 +1689,10 @@ impl Store {
             })?;
         let changed=tx.execute("UPDATE wb_requests SET document=json_set(document,'$.outcome',?,'$.finished_at',?,'$.detail',json_patch(json_extract(document,'$.detail'),json(?))) WHERE id=? AND json_extract(document,'$.outcome')='pending'",params![outcome,ts,serde_json::to_string(&detail)?,id])?;
         if changed > 0 {
+            tx.execute(
+                "UPDATE wb_article_slots SET request_id=NULL,finished_at=? WHERE request_id=?",
+                params![ts, id],
+            )?;
             let mut context = request_context(&event);
             context["duration_ms"] = json!(((ts - event.started_at) * 1000.).max(0.));
             context["outcome"] = json!(outcome);
@@ -1847,6 +1863,7 @@ impl Store {
             )?;
         }
         tx.execute("UPDATE wb_requests SET document=json_set(document,'$.outcome','interrupted','$.finished_at',?) WHERE json_extract(document,'$.outcome')='pending'",[ts])?;
+        tx.execute("UPDATE wb_article_slots SET request_id=NULL,finished_at=? WHERE request_id IS NOT NULL",[ts])?;
         tx.commit()?;
         Ok(())
     }
