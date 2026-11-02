@@ -319,7 +319,7 @@ impl Store {
         value.cooldown_until = old.unwrap_or(0.);
         let text = serde_json::to_string(&value)?;
         tx.execute("INSERT INTO wb_policy VALUES(1,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document",[&text])?;
-        tx.execute("UPDATE push_monitor SET document=json_set(document,'$.next_fetch_at',0,'$.reason',NULL) WHERE id=1",[])?;
+        tx.execute("UPDATE push_monitor SET document=json_set(document,'$.next_fetch_at',0,'$.reason',NULL) WHERE id=1 AND json_extract(document,'$.active')=1 AND COALESCE(json_extract(document,'$.next_fetch_at'),0)>0",[])?;
         tx.execute(
             "INSERT INTO wb_policy_history VALUES(?,?,?)",
             params![value.version, now(), text],

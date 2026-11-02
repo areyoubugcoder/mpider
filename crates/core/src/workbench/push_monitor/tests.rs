@@ -989,3 +989,16 @@ fn reducing_retry_setting_prevents_next_unsent_attempt() {
         "retry_limit"
     );
 }
+
+#[test]
+fn saving_policy_preserves_stopped_monitor_failure_reason() {
+    let (store, id, _) = setup(Config::default());
+    store
+        .push_end(id, "failed", Some("扫描器读取失败"))
+        .unwrap();
+    store.wb_set_policy(store.wb_policy().unwrap()).unwrap();
+    assert_eq!(
+        store.push_run().unwrap().reason.as_deref(),
+        Some("扫描器读取失败")
+    );
+}
