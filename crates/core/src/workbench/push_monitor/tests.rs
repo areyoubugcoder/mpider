@@ -20,9 +20,16 @@ var ct = "{}";
         now() as i64
     )
 }
+// 既有解析回归显式开启两个独立运行；首次运行编号恰好一致。
+fn start_both(store: &Store, config: Config) -> i64 {
+    let scan_id = store.push_start(config).unwrap();
+    let queue_id = store.push_queue_start().unwrap();
+    assert_eq!(scan_id, queue_id);
+    queue_id
+}
 fn setup(config: Config) -> (Store, i64, i64) {
     let store = Store::open_in_memory().unwrap();
-    let id = store.push_start(config).unwrap();
+    let id = start_both(&store, config);
     store
         .push_scanned(
             id,
@@ -75,7 +82,7 @@ fn long_checksum_survives_discovery_and_requeues_failed_candidate_without_resett
         assert_eq!(discover(bytes), vec![signed.clone()]);
     }
     let store = Store::open_in_memory().unwrap();
-    let id = store.push_start(Config::default()).unwrap();
+    let id = start_both(&store, Config::default());
     let mut unsigned = link("FAKE_A");
     unsigned.url = unsigned.url.split("&chksm=").next().unwrap().to_owned();
     store
@@ -147,7 +154,7 @@ async fn queued_webpage_is_fetched_while_memory_scan_is_still_running() {
         }
     }
     let store = Store::open_in_memory().unwrap();
-    let id = store.push_start(Config::default()).unwrap();
+    let id = start_both(&store, Config::default());
     store
         .push_scanned(
             id,
@@ -161,10 +168,13 @@ async fn queued_webpage_is_fetched_while_memory_scan_is_still_running() {
     let store = Arc::new(store);
     let entered = Arc::new(AtomicBool::new(false));
     let (endpoint, server) = fixture(200, html("FAKE_A")).await;
+    let scan_task = tokio::spawn(run_with_scanner(
+        store.clone(),
+        id,
+        WaitingScanner(entered.clone()),
+    ));
     let clone = store.clone();
-    let scanner = WaitingScanner(entered.clone());
-    let task =
-        tokio::spawn(async move { run_with_scanner_at(clone, id, scanner, Some(&endpoint)).await });
+    let task = tokio::spawn(async move { run_queue_at(clone, id, Some(&endpoint)).await });
     tokio::time::timeout(Duration::from_secs(3), server)
         .await
         .unwrap()
@@ -178,6 +188,13 @@ async fn queued_webpage_is_fetched_while_memory_scan_is_still_running() {
     .unwrap();
     assert_eq!(store.push_run().unwrap().rounds, 1);
     store.push_end(id, "stopped", None).unwrap();
+    assert!(store.push_queue_is_active(id).unwrap());
+    store.push_queue_end(id, "paused", None).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), scan_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     tokio::time::timeout(Duration::from_secs(3), task)
         .await
         .unwrap()
@@ -233,7 +250,7 @@ fn stop_restart_preserves_queue_and_rejects_late_results() {
     let meta = metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap();
     store.push_import(id, candidate, &meta, now()).unwrap();
     assert!(store.list_accounts().unwrap().is_empty());
-    let next = store.push_start(Config::default()).unwrap();
+    let next = store.push_queue_start().unwrap();
     assert_ne!(next, id);
     assert_eq!(store.push_next(next, now()).unwrap().unwrap().id, candidate);
     store.push_import(id, candidate, &meta, now()).unwrap();
@@ -251,7 +268,7 @@ fn event_article_and_account_commit_atomically_and_never_touch_sessions() {
         (now() * 1000000.) as u64
     ));
     let store = Store::open(&path).unwrap();
-    let id = store.push_start(Config::default()).unwrap();
+    let id = start_both(&store, Config::default());
     store
         .push_scanned(
             id,
@@ -383,8 +400,8 @@ fn article_daily_budget_survives_runs_and_is_shared_with_downloads() {
         .unwrap()
         .request_id
         .is_some());
-    store.push_end(id, "stopped", None).unwrap();
-    let next = store.push_start(Config::default()).unwrap();
+    store.push_queue_end(id, "paused", None).unwrap();
+    let next = store.push_queue_start().unwrap();
     for category in [CATEGORY, "body"] {
         let purpose = if category == CATEGORY {
             PURPOSE
@@ -455,7 +472,7 @@ fn article_interval_is_shared_and_live_policy_change_releases_waiting_monitor() 
     policy.body_gap_ms = 5000;
     policy.body_daily_budget = 3;
     store.wb_set_policy(policy).unwrap();
-    assert_eq!(store.push_run().unwrap().next_fetch_at, 0.);
+    assert_eq!(store.push_run().unwrap().queue.next_fetch_at, 0.);
     assert!(store
         .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", ts + 38.)
         .unwrap()
@@ -556,7 +573,7 @@ async fn redirect_waits_for_daily_article_budget_after_reopen_without_hidden_htt
     .unwrap();
     server.await.unwrap();
     store.push_restart().unwrap();
-    let next_run = store.push_start(Config::default()).unwrap();
+    let next_run = store.push_queue_start().unwrap();
     let candidate = store.push_next(next_run, now()).unwrap().unwrap();
     process_at(
         &store,
@@ -569,7 +586,7 @@ async fn redirect_waits_for_daily_article_budget_after_reopen_without_hidden_htt
     .unwrap();
     assert_eq!(store.push_status().unwrap().requests_24h, 1);
     assert_eq!(store.push_status().unwrap().pending, 1);
-    assert!(store.push_run().unwrap().next_fetch_at > now() + 86300.);
+    assert!(store.push_run().unwrap().queue.next_fetch_at > now() + 86300.);
 }
 
 #[tokio::test]
@@ -745,7 +762,7 @@ async fn stop_during_http_does_not_commit_late_reply() {
         process_at(&clone, &client().unwrap(), id, candidate, &endpoint).await
     });
     let (socket, _) = listener.accept().await.unwrap();
-    store.push_end(id, "stopped", None).unwrap();
+    store.push_queue_end(id, "paused", None).unwrap();
     tokio::time::timeout(Duration::from_secs(3), task)
         .await
         .unwrap()
@@ -757,7 +774,10 @@ async fn stop_during_http_does_not_commit_late_reply() {
     let requests = store.wb_snapshot().unwrap().requests;
     assert_eq!(requests[0].outcome, "cancelled");
     assert_eq!(requests[0].owner_kind, "push_monitor");
-    assert_eq!(json!(store.push_status().unwrap())["run"]["active"], false);
+    assert_eq!(
+        json!(store.push_status().unwrap())["run"]["queue"]["active"],
+        false
+    );
 }
 
 #[test]
@@ -770,7 +790,7 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
     {
         let store = Store::open(&path).unwrap();
         article_budget(&store, 1);
-        let id = store.push_start(Config::default()).unwrap();
+        let id = start_both(&store, Config::default());
         store
             .push_scanned(
                 id,
@@ -791,7 +811,8 @@ fn persisted_queue_and_request_budget_survive_database_reopen() {
         let store = Store::open(&path).unwrap();
         store.push_restart().unwrap();
         assert!(!store.push_status().unwrap().run.active);
-        let id = store.push_start(Config::default()).unwrap();
+        assert!(!store.push_status().unwrap().run.queue.active);
+        let id = store.push_queue_start().unwrap();
         assert_eq!(store.push_next(id, now()).unwrap().unwrap().attempts, 1);
         assert!(store
             .wb_request_permit(CATEGORY, PURPOSE, id, "FAKE_A", now())
@@ -864,7 +885,7 @@ async fn scanner_stop_is_cooperative_and_partial_results_are_discarded() {
 #[test]
 fn recent_discoveries_are_hour_bounded_and_keyset_pages_do_not_skip_or_repeat() {
     let store = Store::open_in_memory().unwrap();
-    let id = store.push_start(Config::default()).unwrap();
+    let id = start_both(&store, Config::default());
     let ts = now();
     store
         .push_scanned(
@@ -1012,4 +1033,244 @@ fn saving_policy_preserves_stopped_monitor_failure_reason() {
         store.push_run().unwrap().reason.as_deref(),
         Some("扫描器读取失败")
     );
+}
+
+#[test]
+fn scanning_and_processing_have_independent_generations_and_controls() {
+    let store = Store::open_in_memory().unwrap();
+    let scan = store.push_start(Config::default()).unwrap();
+    store
+        .push_scanned(
+            scan,
+            Scan {
+                links: vec![link("FAKE_A")],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    assert!(!store.push_run().unwrap().queue.active);
+    assert!(store.push_next(scan, now()).unwrap().is_none());
+    assert!(store
+        .wb_request_permit(CATEGORY, PURPOSE, scan, "FAKE_A", now())
+        .is_err());
+    store.push_end(scan, "stopped", None).unwrap();
+    let scan = store.push_start(Config::default()).unwrap();
+    let queue = store.push_queue_start().unwrap();
+    assert_ne!(scan, queue);
+    assert!(store.push_queue_start().is_err());
+    let candidate = store.push_next(queue, now()).unwrap().unwrap();
+    assert!(store.push_claim(queue, candidate.id).unwrap());
+    store.push_queue_end(queue, "paused", None).unwrap();
+    assert!(store.push_is_active(scan).unwrap());
+    store
+        .push_scanned(
+            scan,
+            Scan {
+                links: vec![link("FAKE_B")],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    assert_eq!(store.push_status().unwrap().pending, 2);
+    let next = store.push_queue_start().unwrap();
+    store
+        .push_import(
+            queue,
+            candidate.id,
+            &metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap(),
+            now(),
+        )
+        .unwrap();
+    store
+        .push_queue_end(queue, "failed", Some("旧处理器晚到错误"))
+        .unwrap();
+    assert!(store.push_queue_is_active(next).unwrap());
+    assert_eq!(store.push_status().unwrap().imported, 0);
+    store.push_end(scan, "stopped", None).unwrap();
+    assert!(store.push_queue_is_active(next).unwrap());
+    assert!(store.push_claim(next, candidate.id).unwrap());
+    store
+        .push_import(
+            next,
+            candidate.id,
+            &metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap(),
+            now(),
+        )
+        .unwrap();
+    assert_eq!(store.push_status().unwrap().imported, 1);
+}
+
+#[tokio::test]
+async fn queue_worker_processes_saved_links_with_scanning_stopped() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let scan = store.push_start(Config::default()).unwrap();
+    store
+        .push_scanned(
+            scan,
+            Scan {
+                links: vec![link("FAKE_A")],
+                ..Default::default()
+            },
+            now(),
+        )
+        .unwrap();
+    store.push_end(scan, "stopped", None).unwrap();
+    let queue = store.push_queue_start().unwrap();
+    let (endpoint, server) = fixture(200, html("FAKE_A")).await;
+    let clone = store.clone();
+    let worker = tokio::spawn(async move { run_queue_at(clone, queue, Some(&endpoint)).await });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        server.await.unwrap();
+        while store.push_status().unwrap().imported != 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let status = store.push_status().unwrap();
+    assert!(!status.run.active);
+    assert!(status.run.queue.active);
+    assert_eq!(status.run.rounds, 1);
+    assert_eq!(status.pending, 0);
+    assert_eq!(status.requests_24h, 1);
+    store.push_queue_end(queue, "paused", None).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), worker)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn stopping_scan_keeps_inflight_queue_request_and_its_result() {
+    let (store, id, _) = setup(Config::default());
+    let store = Arc::new(store);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/s", listener.local_addr().unwrap());
+    let candidate = store.push_next(id, now()).unwrap().unwrap();
+    let clone = store.clone();
+    let worker = tokio::spawn(async move {
+        process_at(&clone, &client().unwrap(), id, candidate, &endpoint).await
+    });
+    let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut request = [0u8; 4096];
+    socket.read(&mut request).await.unwrap();
+    store.push_end(id, "stopped", None).unwrap();
+    let body = html("FAKE_A");
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), worker)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.push_status().unwrap().imported, 1);
+    assert!(store.push_run().unwrap().queue.active);
+    assert!(!store.push_run().unwrap().active);
+}
+
+#[test]
+fn changing_scan_scope_does_not_reclassify_saved_links_or_clear_queue_wait() {
+    let config = Config {
+        bizzes: vec!["FAKE_A".into()],
+        recent_hours: 168,
+        ..Default::default()
+    };
+    let (store, queue, candidate) = setup(config);
+    store
+        .push_deferred(queue, now() + 3600., Some("测试额度等待"))
+        .unwrap();
+    store
+        .push_end(store.push_run().unwrap().id, "stopped", None)
+        .unwrap();
+    store
+        .push_start(Config {
+            bizzes: vec!["FAKE_B".into()],
+            recent_hours: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    let run = store.push_run().unwrap();
+    assert!(run.queue.active);
+    assert!(run.queue.next_fetch_at > now());
+    assert_eq!(run.queue.reason.as_deref(), Some("测试额度等待"));
+    assert!(store.push_claim(queue, candidate).unwrap());
+    let mut meta = metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap();
+    meta.published_at -= 2 * 86400;
+    store.push_import(queue, candidate, &meta, now()).unwrap();
+    assert_eq!(store.push_status().unwrap().imported, 1);
+}
+
+#[test]
+fn legacy_queue_migration_preserves_candidates_attempts_and_discovery_scope() {
+    let path = std::env::temp_dir().join(format!(
+        "mpider-push-migrate-{}-{}.db",
+        std::process::id(),
+        (now() * 1000000.) as u64
+    ));
+    {
+        let store = Store::open(&path).unwrap();
+        let id = store
+            .push_start(Config {
+                bizzes: vec!["FAKE_A".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        store
+            .push_scanned(
+                id,
+                Scan {
+                    links: vec![link("FAKE_A")],
+                    ..Default::default()
+                },
+                now(),
+            )
+            .unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE push_candidates DROP COLUMN config; UPDATE push_candidates SET state='fetching',attempts=1; UPDATE push_monitor SET document=json_remove(document,'$.queue');").unwrap();
+    }
+    {
+        let store = Store::open(&path).unwrap();
+        store.push_restart().unwrap();
+        assert!(!store.push_run().unwrap().active);
+        assert!(!store.push_run().unwrap().queue.active);
+        assert_eq!(
+            store.push_events(None, 10).unwrap().items[0].outcome,
+            "pending"
+        );
+        store
+            .push_start(Config {
+                bizzes: vec!["FAKE_B".into()],
+                ..Default::default()
+            })
+            .unwrap();
+        let queue = store.push_queue_start().unwrap();
+        let candidate = store.push_next(queue, now()).unwrap().unwrap();
+        assert_eq!(candidate.attempts, 1);
+        store.push_claim(queue, candidate.id).unwrap();
+        store
+            .push_import(
+                queue,
+                candidate.id,
+                &metadata(&link("FAKE_A"), &html("FAKE_A")).unwrap(),
+                now(),
+            )
+            .unwrap();
+        assert_eq!(store.push_status().unwrap().imported, 1);
+    }
+    let _ = std::fs::remove_file(path);
 }

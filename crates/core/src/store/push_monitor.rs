@@ -1,7 +1,7 @@
 //! 推送候选、事件与文章提交同事务；运行世代挡住停止/重启后的晚到结果。
 use super::*;
 use crate::workbench::push_monitor::{
-    Candidate, Config, EventCursor, EventPage, Metadata, MonitorEvent, Run, Scan, Status,
+    Candidate, Config, EventCursor, EventPage, Metadata, MonitorEvent, QueueRun, Run, Scan, Status,
     MAX_CANDIDATES,
 };
 use anyhow::{ensure, Context};
@@ -15,13 +15,30 @@ CREATE TABLE IF NOT EXISTS push_candidates(
  first_seen_at REAL NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
  retry_at REAL NOT NULL DEFAULT 0,finished_at REAL,biz TEXT NOT NULL DEFAULT '',
  nickname TEXT NOT NULL DEFAULT '',title TEXT NOT NULL DEFAULT '',published_at INTEGER,
- article_id INTEGER,reason TEXT
+ article_id INTEGER,reason TEXT,config TEXT
 );
 CREATE INDEX IF NOT EXISTS push_pending ON push_candidates(state,retry_at,id);
 CREATE INDEX IF NOT EXISTS push_discovered_time ON push_candidates(first_seen_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS push_event_time ON push_candidates(COALESCE(finished_at,first_seen_at) DESC,id DESC);
 CREATE INDEX IF NOT EXISTS push_request_budget ON wb_requests(json_extract(document,'$.purpose'),json_extract(document,'$.started_at'));
 "#;
+pub(super) fn migrate(conn: &Connection) -> Result<()> {
+    let has_config = conn
+        .prepare("PRAGMA table_info(push_candidates)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .iter()
+        .any(|name| name == "config");
+    if !has_config {
+        conn.execute("ALTER TABLE push_candidates ADD COLUMN config TEXT", [])?;
+    }
+    // 旧候选采用升级前保存的范围；之后重新开启扫描不再改变它们的筛选条件。
+    conn.execute(
+        "UPDATE push_candidates SET config=COALESCE((SELECT json_extract(document,'$.config') FROM push_monitor WHERE id=1),'{}') WHERE config IS NULL",
+        [],
+    )?;
+    Ok(())
+}
 fn run_from(conn: &Connection) -> Result<Run> {
     let text: Option<String> = conn
         .query_row("SELECT document FROM push_monitor WHERE id=1", [], |r| {
@@ -53,6 +70,10 @@ fn active(tx: &Transaction<'_>, id: i64) -> Result<bool> {
     let r = run_from(tx)?;
     Ok(r.active && r.id == id)
 }
+fn queue_active(tx: &Transaction<'_>, id: i64) -> Result<bool> {
+    let r = run_from(tx)?;
+    Ok(r.queue.active && r.queue.id == id)
+}
 fn terminal(
     tx: &Transaction<'_>,
     candidate: i64,
@@ -74,6 +95,10 @@ impl Store {
         let r = self.push_run()?;
         Ok(r.active && r.id == id)
     }
+    pub fn push_queue_is_active(&self, id: i64) -> Result<bool> {
+        let r = self.push_run()?;
+        Ok(r.queue.active && r.queue.id == id)
+    }
     /// 此底层入口也供离线测试使用；桌面 IPC 在进入前检查 Windows 平台。
     pub fn push_start(&self, config: Config) -> Result<i64> {
         config.validate()?;
@@ -87,20 +112,16 @@ impl Store {
             phase: "starting".into(),
             config,
             started_at: now(),
+            queue: old.queue,
             ..Default::default()
         };
-        // 上次停止时正在处理的候选重新排队；终态和历史请求预算保留。
-        tx.execute(
-            "UPDATE push_candidates SET state='pending' WHERE state='fetching'",
-            [],
-        )?;
         tx.execute("DELETE FROM push_candidates WHERE state NOT IN ('pending','fetching') AND finished_at<?", [now()-30.*86400.])?;
         save(&tx, &run)?;
         system_logs::write(
             &tx,
             "push_monitor",
             "info",
-            "推送监测已开启，已有待处理候选继续处理",
+            "推送监测已开启，持续扫描并追加新链接",
             json!({"monitor_run_id":run.id,"state":"starting"}),
         )?;
         tx.commit()?;
@@ -118,25 +139,84 @@ impl Store {
         run.phase = phase.into();
         run.reason = reason.map(str::to_owned);
         run.next_scan_at = 0.;
-        run.next_fetch_at = 0.;
         save(&tx, &run)?;
         system_logs::write(
             &tx,
             "push_monitor",
             if phase == "failed" { "error" } else { "info" },
-            "推送监测已停止，候选队列已保留",
+            "推送监测已停止，待处理链接的处理状态不变",
             json!({"monitor_run_id":id,"state":phase,"reason":reason}),
         )?;
         tx.commit()?;
         Ok(())
     }
     pub fn push_restart(&self) -> Result<()> {
-        let id = self.push_run()?.id;
-        self.push_end(
-            id,
-            "stopped",
-            Some("应用已重启；待处理链接已保留，请手动开启推送监测"),
-        )
+        let run = self.push_run()?;
+        self.push_end(run.id, "stopped", Some("应用已重启；新链接扫描已停止"))?;
+        self.push_queue_end(
+            run.queue.id,
+            "paused",
+            Some("应用已重启；待处理链接已保留，可独立开始处理"),
+        )?;
+        // 兼容旧版只有扫描开关时遗留的正在处理状态。
+        self.conn().execute(
+            "UPDATE push_candidates SET state='pending' WHERE state='fetching'",
+            [],
+        )?;
+        Ok(())
+    }
+    pub fn push_queue_start(&self) -> Result<i64> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut run = run_from(&tx)?;
+        ensure!(!run.queue.active, "待处理链接已经在处理中");
+        run.queue = QueueRun {
+            id: run.queue.id.checked_add(1).context("处理运行编号已耗尽")?,
+            active: true,
+            phase: "running".into(),
+            ..Default::default()
+        };
+        tx.execute(
+            "UPDATE push_candidates SET state='pending' WHERE state='fetching'",
+            [],
+        )?;
+        save(&tx, &run)?;
+        system_logs::write(
+            &tx,
+            "push_monitor",
+            "info",
+            "待处理链接已开始处理",
+            json!({"queue_run_id":run.queue.id}),
+        )?;
+        tx.commit()?;
+        Ok(run.queue.id)
+    }
+    pub fn push_queue_end(&self, id: i64, phase: &str, reason: Option<&str>) -> Result<()> {
+        ensure!(["paused", "failed"].contains(&phase), "处理状态无效");
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut run = run_from(&tx)?;
+        if !run.queue.active || run.queue.id != id {
+            return Ok(());
+        }
+        run.queue.active = false;
+        run.queue.phase = phase.into();
+        run.queue.reason = reason.map(str::to_owned);
+        run.queue.next_fetch_at = 0.;
+        tx.execute(
+            "UPDATE push_candidates SET state='pending' WHERE state='fetching'",
+            [],
+        )?;
+        save(&tx, &run)?;
+        system_logs::write(
+            &tx,
+            "push_monitor",
+            if phase == "failed" { "error" } else { "info" },
+            "待处理链接已暂停，扫描状态不变",
+            json!({"queue_run_id":id,"state":phase,"reason":reason}),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn push_scanned(&self, id: i64, scan: Scan, ts: f64) -> Result<()> {
         let mut conn = self.conn();
@@ -199,8 +279,8 @@ impl Store {
                 }
             } else if remaining > 0 {
                 tx.execute(
-                    "INSERT INTO push_candidates(key,url,first_seen_at,biz) VALUES(?,?,?,?)",
-                    params![link.key, link.url, ts, link.biz.as_deref().unwrap_or("")],
+                    "INSERT INTO push_candidates(key,url,first_seen_at,biz,config) VALUES(?,?,?,?,?)",
+                    params![link.key, link.url, ts, link.biz.as_deref().unwrap_or(""), serde_json::to_string(&run.config)?],
                 )?;
                 remaining -= 1;
             }
@@ -230,7 +310,7 @@ impl Store {
     pub fn push_next(&self, id: i64, ts: f64) -> Result<Option<Candidate>> {
         let conn = self.conn();
         let run = run_from(&conn)?;
-        if !run.active || run.id != id || ts < run.next_fetch_at {
+        if !run.queue.active || run.queue.id != id || ts < run.queue.next_fetch_at {
             return Ok(None);
         }
         Ok(conn.query_row("SELECT id,url,attempts,first_seen_at,key FROM push_candidates WHERE state='pending' AND retry_at<=? ORDER BY COALESCE(reason IN ('redirect_pending','link_updated'),0) DESC,(attempts=0) DESC,first_seen_at DESC,id DESC LIMIT 1",[ts],|r|Ok(Candidate{id:r.get(0)?,url:r.get(1)?,attempts:r.get(2)?,first_seen_at:r.get(3)?,key:r.get(4)?})).optional()?)
@@ -238,7 +318,7 @@ impl Store {
     pub fn push_claim(&self, id: i64, candidate: i64) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !active(&tx, id)? {
+        if !queue_active(&tx, id)? {
             return Ok(false);
         }
         let limit = request_limit(&tx)?;
@@ -247,7 +327,8 @@ impl Store {
             tx.execute("UPDATE push_candidates SET state='retry_limit',reason='retry_limit',finished_at=? WHERE id=? AND state='pending' AND attempts>=?",params![now(),candidate,limit])?;
         }
         let mut run = run_from(&tx)?;
-        run.next_fetch_at = 0.;
+        run.queue.next_fetch_at = 0.;
+        run.queue.reason = None;
         save(&tx, &run)?;
         tx.commit()?;
         Ok(changed == 1)
@@ -255,12 +336,12 @@ impl Store {
     pub fn push_deferred(&self, id: i64, until: f64, reason: Option<&str>) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !active(&tx, id)? {
+        if !queue_active(&tx, id)? {
             return Ok(());
         }
         let mut run = run_from(&tx)?;
-        run.next_fetch_at = until;
-        run.reason = reason.map(str::to_owned);
+        run.queue.next_fetch_at = until;
+        run.queue.reason = reason.map(str::to_owned);
         save(&tx, &run)?;
         tx.commit()?;
         Ok(())
@@ -275,7 +356,7 @@ impl Store {
     ) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !active(&tx, id)? {
+        if !queue_active(&tx, id)? {
             return Ok(());
         }
         let attempts: u32 = tx.query_row(
@@ -303,7 +384,7 @@ impl Store {
             crate::workbench::push_monitor::normalize(url).context("跳转目标不是有效的微信文章")?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !active(&tx, id)? {
+        if !queue_active(&tx, id)? {
             return Ok(());
         }
         let attempts: u32 = tx.query_row(
@@ -328,15 +409,15 @@ impl Store {
     pub fn push_import(&self, id: i64, candidate: i64, meta: &Metadata, ts: f64) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        if !active(&tx, id)? {
+        if !queue_active(&tx, id)? {
             return Ok(());
         }
-        let run = run_from(&tx)?;
-        let (first, key): (f64, String) = tx.query_row(
-            "SELECT first_seen_at,key FROM push_candidates WHERE id=? AND state='fetching'",
+        let (first, key, config): (f64, String, String) = tx.query_row(
+            "SELECT first_seen_at,key,COALESCE(config,'{}') FROM push_candidates WHERE id=? AND state='fetching'",
             [candidate],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
+        let config: Config = serde_json::from_str(&config)?;
         ensure!(
             !key.starts_with("article:") || key == meta.key(),
             "跳转后的文章身份不一致"
@@ -351,11 +432,11 @@ impl Store {
                 candidate
             ],
         )?;
-        let ignored = if !run.config.bizzes.is_empty() && !run.config.bizzes.contains(&meta.biz) {
+        let ignored = if !config.bizzes.is_empty() && !config.bizzes.contains(&meta.biz) {
             Some("不在监测范围")
         } else if meta.published_at as f64 > ts + 1800. {
             Some("发布时间无效")
-        } else if (meta.published_at as f64) < first - run.config.recent_hours as f64 * 3600. {
+        } else if (meta.published_at as f64) < first - config.recent_hours as f64 * 3600. {
             Some("超出文章时间窗")
         } else {
             None
@@ -411,7 +492,7 @@ impl Store {
             "push_monitor",
             "info",
             "监测发现的文章已保存",
-            json!({"monitor_run_id":id,"article_id":article_id,"biz":meta.biz,"new_articles":i64::from(existing.is_none())}),
+            json!({"queue_run_id":id,"article_id":article_id,"biz":meta.biz,"new_articles":i64::from(existing.is_none())}),
         )?;
         tx.commit()?;
         Ok(())

@@ -2608,6 +2608,8 @@ pub fn run() {
             workbench::workbench_push_events,
             workbench::workbench_push_start,
             workbench::workbench_push_stop,
+            workbench::workbench_push_queue_start,
+            workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
             workbench::workbench_source_page,
             workbench::workbench_task_page,

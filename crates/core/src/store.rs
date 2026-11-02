@@ -378,6 +378,7 @@ impl Store {
         conn.execute_batch(native::SCHEMA)?;
         conn.execute_batch(workbench::SCHEMA)?;
         conn.execute_batch(push_monitor::SCHEMA)?;
+        push_monitor::migrate(&conn)?;
         // 系统日志迁移必须确认成功，禁止因磁盘或权限失败而静默丢失日志字段。
         let has_context = conn
             .prepare("PRAGMA table_info(app_log)")?

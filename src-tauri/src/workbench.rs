@@ -53,6 +53,24 @@ pub fn workbench_push_stop(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+pub fn workbench_push_queue_start(state: State<'_, AppState>) -> Result<i64, String> {
+    root(&state)?;
+    let id = state.store.push_queue_start().map_err(|e| e.to_string())?;
+    let store = state.store.clone();
+    tauri::async_runtime::spawn(async move {
+        core::push_monitor::run_queue(store, id).await;
+    });
+    Ok(id)
+}
+#[tauri::command]
+pub fn workbench_push_queue_stop(state: State<'_, AppState>) -> Result<(), String> {
+    let id = state.store.push_run().map_err(|e| e.to_string())?.queue.id;
+    state
+        .store
+        .push_queue_end(id, "paused", None)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 pub fn workbench_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
     state.store.wb_snapshot().map_err(|e| e.to_string())
 }

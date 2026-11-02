@@ -1,11 +1,12 @@
-/** 推送监测与主页识别独立开关；URL 候选与内存内容不经过前端。 */
+/** 新链接扫描、已保存链接处理与主页识别分别控制；原始 URL 不经过前端。 */
 import { invoke } from "@tauri-apps/api/core";
 export interface PushConfig { scan_seconds: number; recent_hours: number; bizzes: string[] }
 export interface PushRun {
   id: number; active: boolean; phase: string; config: PushConfig; started_at: number;
-  last_scan_at: number; next_scan_at: number; next_fetch_at: number; processes: number;
+  last_scan_at: number; next_scan_at: number; queue: PushQueueRun; processes: number;
   read_bytes: number; rounds: number; reason: string | null;
 }
+export interface PushQueueRun { id: number; active: boolean; phase: string; next_fetch_at: number; reason: string | null }
 export interface PushEvent {
   id: number; first_seen_at: number; finished_at: number | null; outcome: string;
   nickname: string; title: string; biz: string; article_id: number | null;
@@ -18,6 +19,8 @@ export const pushEvents = (before: PushEventCursor | null) => invoke<PushEventPa
 export const pushStatus = () => invoke<PushStatus>("workbench_push_status");
 export const startPushMonitor = (config: PushConfig) => invoke<number>("workbench_push_start", { config });
 export const stopPushMonitor = () => invoke<void>("workbench_push_stop");
+export const startPushQueue = () => invoke<number>("workbench_push_queue_start");
+export const stopPushQueue = () => invoke<void>("workbench_push_queue_stop");
 export const defaultPushConfig: PushConfig = { scan_seconds: 10, recent_hours: 24, bizzes: [] };
 export const pushOutcome = (value: string) => ({
   retry_limit: "已达到文章重试上限", pending: "等待处理", fetching: "正在解析", imported: "新增入库", existing: "文章已存在", ignored: "已过滤",
@@ -30,6 +33,12 @@ export function pushPhase(run?: PushRun) {
   if (!run.active) return run.phase === "failed" ? "运行异常" : "已停止";
   if (run.phase === "starting") return "正在启动";
   if (run.phase === "waiting_wechat") return "等待微信启动";
-  if (run.next_fetch_at > Date.now()/1000) return "监测中 · 文章解析等待中";
   return "监测中";
+}
+export function pushQueuePhase(queue?: PushQueueRun, pending = 0, now = Date.now() / 1000) {
+  if (!queue) return "读取中";
+  if (!queue.active) return queue.phase === "failed" ? "处理异常" : "已暂停";
+  if (pending === 0) return "等待待处理链接";
+  if (queue.next_fetch_at > now) return "等待请求额度或间隔";
+  return "正在处理";
 }
