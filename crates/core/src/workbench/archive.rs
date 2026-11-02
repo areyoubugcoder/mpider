@@ -61,7 +61,7 @@ fn active(store: &Store, id: i64) -> bool {
         .is_ok_and(|t| ["queued", "running"].contains(&t.state.as_str()))
 }
 
-/// 所有正文、图片、重试与验证页对照均先入账；worker 数量不会放大同类发送频率。
+/// 请求先入账；文章请求按工作位在响应结束后间隔，图片保留全局发送间隔。
 struct Resource {
     bytes: Vec<u8>,
     request_id: String,
@@ -111,6 +111,7 @@ async fn http_get(
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
+        let mut completion = super::request::Completion::new(store, &request_id);
         store.system_log("archive","info","正文或图片请求已关联文章",json!({"request_id":request_id,"task_id":owner,"article_id":article_id,"biz":biz,"category":category}))?;
         let mut http_status = None;
         let outcome = async {
@@ -139,8 +140,7 @@ async fn http_get(
             Ok::<_, anyhow::Error>(data)
         }
         .await;
-        store.wb_request_finish(
-            &request_id,
+        completion.finish(
             if outcome.is_ok() {
                 "ok"
             } else if http_status == Some(429) {
@@ -494,7 +494,7 @@ fn write_manifest(dir: &Path) -> Result<()> {
 
 /// 阅读接口仅接受文章 ID；内联已归档图片，不授予 WebView 任意磁盘访问权限。
 pub fn reader_html(store: &Store, root: &Path, id: i64) -> Result<String> {
-    let record = store.wb_archive(id)?.context("请先下载正文")?;
+    let record = store.wb_archive(id)?.context("请先下载文章")?;
     let dir = root
         .join("archive/articles")
         .join(id.to_string())

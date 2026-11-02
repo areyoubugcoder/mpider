@@ -229,7 +229,7 @@ export const STAGE_LABELS: Record<LogStage, string> = {
   report: "数据上报",
   detail: "正文补采",
   sweep: "定时巡检",
-  discovery: "首页识别", history: "列表翻页", experiment: "游标实验", archive: "正文下载", export: "数据导出", storage: "数据存储", policy: "请求策略",
+  discovery: "首页识别", history: "列表翻页", experiment: "游标实验", archive: "文章下载", export: "数据导出", storage: "数据存储", policy: "请求策略",
 };
 
 /** 环节顺序（筛选下拉用）。 */

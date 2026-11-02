@@ -4,6 +4,8 @@ pub mod discovery;
 pub mod engine;
 mod export_html;
 pub mod markdown_export;
+pub mod push_monitor;
+mod request;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +20,7 @@ pub struct Policy {
     pub list_max_ms: u64,
     pub list_daily_budget: i64,
     pub body_gap_ms: u64,
+    pub body_daily_budget: i64,
     pub image_gap_ms: u64,
     pub body_workers: usize,
     pub image_workers: usize,
@@ -34,6 +37,7 @@ impl Default for Policy {
             list_max_ms: 120000,
             list_daily_budget: 60,
             body_gap_ms: 1000,
+            body_daily_budget: 86400,
             image_gap_ms: 1000,
             body_workers: 4,
             image_workers: 4,
@@ -55,6 +59,7 @@ impl Policy {
             "请求间隔不能超过一天"
         );
         ensure!(self.list_daily_budget > 0, "列表预算须为正数");
+        ensure!(self.body_daily_budget > 0, "文章下载预算须为正数");
         ensure!(
             (1..=12).contains(&self.body_workers) && (1..=12).contains(&self.image_workers),
             "并发须为 1 至 12"
@@ -206,7 +211,7 @@ pub struct TaskProgress {
     pub finished_ids: Vec<i64>,
 }
 
-pub const SESSION_RECOVERY_HINT: &str = "点击“更新会话并继续”，软件启动主页监测，监测就绪后请在微信打开或刷新该公众号主页；新会话保存后自动继续，原游标与历史进度保留";
+pub const SESSION_RECOVERY_HINT: &str = "点击“更新会话并继续”，软件启动主页识别，监测就绪后请在微信打开或刷新该公众号主页；新会话保存后自动继续，原游标与历史进度保留";
 
 /// 用户明确下发的恢复意图；绑定同步运行、公众号和原会话，停止或暂停即撤销。
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -325,6 +330,7 @@ pub struct Snapshot {
     pub requests: Vec<RequestEvent>,
     pub policy: Policy,
     pub list_calls_24h: i64,
+    pub article_calls_24h: i64,
     pub archives: Vec<ArchiveRecord>,
     pub download_queue: DownloadQueue,
 }

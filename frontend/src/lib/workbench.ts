@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { articleExportProgress, type ArticleExportProgress } from "./export-progress.ts";
 export interface Policy {
   version: number; list_min_ms: number; list_max_ms: number; list_daily_budget: number;
-  body_gap_ms: number; image_gap_ms: number; body_workers: number; image_workers: number;
+  body_gap_ms: number; body_daily_budget: number; image_gap_ms: number; body_workers: number; image_workers: number;
   retries: number; rebuild_limit: number; cooldown_until: number; cooldown_seconds: number;
 }
 export interface Source {
@@ -57,7 +57,7 @@ export interface Snapshot {
   download_queue: { task_count: number; total: number; completed: number; skipped: number; failed: number; cancelled: number; pending: number };
   discovery: Discovery | null;
   sources: Source[]; cursors: CursorRecord[]; tasks: Task[]; experiments: Experiment[];
-  requests: RequestEvent[]; policy: Policy; list_calls_24h: number; archives: ArchiveRecord[];
+  requests: RequestEvent[]; policy: Policy; list_calls_24h: number; article_calls_24h: number; archives: ArchiveRecord[];
 }
 export interface ListPage<T> { items: T[]; total: number }
 export interface SourceListItem extends Source { body_count: number; home_task: Task | null; history_task: Task | null }

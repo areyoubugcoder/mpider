@@ -2,23 +2,23 @@
 
 当前发行目标为 Windows 10/11 x64 原生工作台。首次登记公众号和更新会话需要已登录、解锁且可交互的微信桌面；保存有效会话后的历史翻页、正文和图片任务仍需电脑与应用运行，但不依赖持续点击微信窗口。不提供无人登录的 Windows 服务或自动唤醒。
 
-v1.0.2 包含独立监测、按公众号任务、Markdown/HTML 双格式导出和 GitHub 签名更新。下载时请核对 Release 的源码版本、文件摘要与验证范围；离线 CI 不代替真实采集与安装升级验证。
+v2.0.0 包含独立监测、按公众号任务、Markdown/HTML 双格式导出和 GitHub 签名更新。下载时请核对 Release 的源码版本、文件摘要与验证范围；离线 CI 不代替真实采集与安装升级验证。
 
 ## 使用发行包
 
-推荐安装 `MPider_1.0.2_x64-setup.exe`，也可选择 MSI；安装版携带与便携包相同的 Python 环境和许可，并支持应用内签名更新。以下步骤介绍便携 ZIP 的使用。
+推荐安装 `MPider_2.0.0_x64-setup.exe`，也可选择 MSI；安装版携带与便携包相同的 Python 环境和许可，并支持应用内签名更新。以下步骤介绍便携 ZIP 的使用。
 
 1. 从 [GitHub Releases](https://github.com/areyoubugcoder/mpider/releases) 下载 `MPider-v版本-windows-x64.zip` 和 `SHA256SUMS`，核对来源及摘要：
 
    ```powershell
-   Get-FileHash .\MPider-v1.0.2-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MPider-v2.0.0-windows-x64.zip -Algorithm SHA256
    ```
 
 2. **完整解压**到可写目录，保留 `MPider.exe` 旁的 `runtime`。不要只复制 EXE。发行包附带 Python 3.12.10、Frida 17.23.3、cryptography 50.0.2 及其依赖，无需安装 Node.js、pnpm、Rust 或系统 Python。
 3. 确认已安装 [WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。包内不包含微信和 WebView2；微信适配须匹配精确模块指纹，当前验证版本为 4.1.15.56。
 4. 双击 `MPider.exe`。设置中的 Python 路径保留默认 `python`，程序优先使用自身旁的 `runtime/python.exe`。已有用户曾填写绝对路径时，需恢复默认或填写本发行包 Python 的完整路径。
-5. 在「公众号」开启「公众号监测」，再在微信手动打开目标公众号主页，等待登记名称与完整会话。监测不自动入库文章；在该公众号行点击「同步最新文章（首页）」或「采集历史文章」，后者单独选择追加篇数或截止日期。
-6. 文章入库后再单独下载正文。未下载文章显示下载，已下载文章显示阅读和导出；整号或批量导出要求目标正文全部下载。任务按首页同步、历史采集、正文下载三个标签管理，列表默认每页10条。
+5. 在「公众号」开启「主页识别」，再在微信手动打开目标公众号主页，等待登记名称与完整会话。监测不自动入库文章；在该公众号行点击「同步最新文章（首页）」或「采集历史文章」，后者单独选择追加篇数或截止日期。
+6. 文章入库后再单独下载文章。未下载文章显示下载，已下载文章显示阅读和导出；整号或批量导出要求目标正文全部下载。任务按首页同步、历史采集、文章下载三个标签管理，列表默认每页10条。
 
 程序未代码签名，系统可能阻止运行；请自行核对下载来源与 SHA-256 后决定是否运行。当前工作台不要求安装根证书或修改系统代理。Frida 可能引发微信崩溃，长时间稳定性和请求风控仍有限制，详见 README。
 
@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Rel
 
 `Bypass` 仅作用于当前 PowerShell 进程，不修改机器策略。脚本遵循已有 `CARGO_TARGET_DIR`，运行 `pnpm tauri build --no-bundle`，把前端与已内嵌的 native worker、JS 和 profiles 编译到 EXE，再附带隔离 Python/Frida 环境，产物位于：
 
-- `dist-windows/MPider-v1.0.2-windows-x64.zip`：完整便携包。
+- `dist-windows/MPider-v2.0.0-windows-x64.zip`：完整便携包。
 - `dist-windows/SHA256SUMS`：ZIP 的 SHA-256。
 - `dist-windows/verification.json`：离线验收记录。
 
@@ -57,7 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Rel
 `release-manifest.json` 列出包内文件摘要、源码 revision 与依赖版本。独立验证命令为：
 
 ```powershell
-python tools/verify-windows-release.py --directory dist-windows\MPider-v1.0.2-windows-x64
+python tools/verify-windows-release.py --directory dist-windows\MPider-v2.0.0-windows-x64
 ```
 
 该检查只核对文件完整性、x64 PE、实际 Python/依赖版本以及虚构材料 AES-GCM 和当前用户 DPAPI 往返，不启动微信、不读取真实会话、不发送采集请求。**离线检查成功不代表真实采集或长期稳定性通过。**页面交互验收需在交互桌面另行进行，真实数据不得进入公开包。
@@ -68,7 +68,7 @@ python tools/verify-windows-release.py --directory dist-windows\MPider-v1.0.2-wi
 
 数据库默认位于应用数据目录的 `mpider.db`，以设置页显示路径为准。正文归档和实验报告位于同目录 `workbench/archive/`、`workbench/experiments/`。会话与原始游标受当前 Windows 用户 DPAPI 保护，不能简单跨用户复制使用；普通文章导出不含密钥。便携包表示程序免安装，**不表示用户数据存于 EXE 旁**。
 
-公众号监测在跨页、任务完成和窗口关闭到托盘后保持开启；底栏常驻显示状态，公众号页也提供开关。开启监测本身不发列表请求或采集文章，程序不会搜索、点击、刷新或改变微信窗口。应用重启不静默附加微信。
+主页识别在跨页、任务完成和窗口关闭到托盘后保持开启；底栏常驻显示状态，公众号页也提供开关。开启监测本身不发列表请求或采集文章，程序不会搜索、点击、刷新或改变微信窗口。应用重启不静默附加微信。
 
 首页/历史任务首次需要新会话时会自动启动监测；待提示就绪后，手动打开或刷新目标公众号主页，完整新会话到齐后自动继续原任务。只有首页响应、其他公众号或迟到旧事件均不能恢复任务；更新后仍失败时停止自动循环，可点击“更新会话并继续”。暂停、取消、关闭监测或应用重启都会撤销自动继续意图，详见[实现原理](how-it-works.md#会话更新与自动继续)。
 

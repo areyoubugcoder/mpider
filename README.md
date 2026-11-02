@@ -2,7 +2,7 @@
 
 在自己的 Windows 电脑上采集微信公众号文章，保存正文与图片，离线阅读，并同时导出 **Markdown 和 HTML**。
 
-使用已登录的微信会话，通过当前 Windows 原生列表与会话协议采集。公众号监测、列表采集和正文下载分别控制，文章与任务进度保存在本机。
+使用已登录的微信会话，通过当前 Windows 原生列表与会话协议采集。主页识别、列表采集和正文下载分别控制，文章与任务进度保存在本机。
 
 > [!WARNING]
 > **所有需要使用个人微信号的客户端，都可能存在封号风险，MPider 也不例外。** 无论是扫码登录、读取已登录会话，还是通过其他方式使用个人微信号，本地运行、开源、低频请求或使用账号池，都不代表账号安全，也无法保证不被封号。使用前请充分评估风险，避免使用承载重要联系人、工作或支付用途的账号。
@@ -13,7 +13,7 @@
 
 [项目官网](https://areyoubugcoder.github.io/mpider/) · [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/8c23uHExcT6) · [进群交流](https://qm.qq.com/q/s4JavFxA3e)
 
-> **v1.0.2 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
+> **v2.0.0 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 
 ## 什么是账号池？有什么风险？
 
@@ -61,7 +61,7 @@ flowchart TD
 
 **公众号：先监测登记，再按公众号同步首页、采集历史、下载正文。**
 
-![公众号监测与采集工作台](docs/screenshots/workbench-sources.png)
+![主页识别与采集工作台](docs/screenshots/workbench-sources.png)
 
 **文章库：按公众号筛选，下载后阅读，同时导出 Markdown 和 HTML。**
 
@@ -75,7 +75,8 @@ flowchart TD
 
 | 功能 | 使用方式 |
 | --- | --- |
-| 公众号监测 | 开启后在微信手动打开公众号主页，登记公众号与会话；监测本身不入库文章 |
+| 推送监测 | 后台发现本机微信中的文章链接，通过网页校验后自动去重入库，详见[使用说明](docs/push-monitor.md) |
+| 主页识别 | 开启后在微信手动打开公众号主页，登记公众号与会话；识别本身不入库文章 |
 | 同步最新文章 | 每个公众号单独获取首页，去重入库，不改变历史检查点 |
 | 采集历史文章 | 按追加篇数或截止日期创建任务，支持暂停和检查点续采 |
 | 更新会话后续采 | 按提示手动打开目标主页，完整新会话到齐后继续原任务 |
@@ -96,9 +97,9 @@ flowchart TD
 
 | 下载文件 | 用途 |
 | --- | --- |
-| `MPider_1.0.2_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
-| `MPider_1.0.2_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v1.0.2-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
+| `MPider_2.0.0_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
+| `MPider_2.0.0_x64_zh-CN.msi` | 中文 MSI 安装版 |
+| `MPider-v2.0.0-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
 | `SHA256SUMS` | 核对下载文件的 SHA-256 |
 
 三个客户端包均携带 Python **3.12.10**、Frida **17.23.3**、cryptography **50.0.2** 及所需许可，无需另外安装 Python、Node.js、pnpm 或 Rust。微信和 WebView2 需要自行安装。不要只复制便携包内的 EXE。
@@ -106,12 +107,12 @@ flowchart TD
 安装包附带应用更新签名，用于 MPider 验证更新文件；它不等同于 Windows 开发者代码签名，系统仍可能提示发布者未知。可先核对附件摘要：
 
 ```powershell
-Get-FileHash .\MPider_1.0.2_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\MPider_2.0.0_x64-setup.exe -Algorithm SHA256
 ```
 
 ## 开始采集
 
-1. **登记公众号**：打开 MPider，在「公众号」页开启「公众号监测」，再到微信手动打开目标公众号主页，等待名称与会话登记。此时不会自动采集文章。
+1. **登记公众号**：打开 MPider，在「公众号」页开启「主页识别」，再到微信手动打开目标公众号主页，等待名称与会话登记。此时不会自动采集文章。
 2. **获取文章列表**：在对应公众号行点击「同步最新文章」获取首页；需要历史内容时，点击「采集历史文章」，选择追加篇数或截止日期。
 3. **处理会话更新**：任务提示需要新会话时，按提示在微信重新打开或刷新该公众号主页。完整会话到齐后会沿原任务继续，程序不会替你点击微信窗口。
 4. **下载正文**：在公众号行点击「下载全部正文」，或在文章库下载单篇、勾选文章。下载包括正文、封面与正文图片，已保存正文自动跳过。
@@ -125,7 +126,7 @@ Get-FileHash .\MPider_1.0.2_x64-setup.exe -Algorithm SHA256
 
 ```mermaid
 flowchart TD
-    A[开启公众号监测] --> B[在微信手动打开公众号主页]
+    A[开启主页识别] --> B[在微信手动打开公众号主页]
     B --> C[登记公众号、完整会话与首页游标]
     C --> D{按公众号发起列表任务}
     D --> E[同步最新文章：只获取首页]

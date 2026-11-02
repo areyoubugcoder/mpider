@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 mod home_sync;
 mod pagination;
+mod request_slots;
 mod source_actions;
 mod source_delete;
 
@@ -28,6 +29,8 @@ CREATE TABLE IF NOT EXISTS wb_experiments(id INTEGER PRIMARY KEY,document TEXT N
 CREATE TABLE IF NOT EXISTS wb_probes(id INTEGER PRIMARY KEY,experiment_id INTEGER NOT NULL,document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_requests(id TEXT PRIMARY KEY,document TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS wb_request_time ON wb_requests(json_extract(document,'$.started_at'));
+CREATE INDEX IF NOT EXISTS wb_article_request_time ON wb_requests(json_extract(document,'$.started_at')) WHERE json_extract(document,'$.category') IN ('body','webpage');
+CREATE TABLE IF NOT EXISTS wb_article_slots(slot INTEGER PRIMARY KEY,request_id TEXT,finished_at REAL);
 CREATE TABLE IF NOT EXISTS wb_policy(id INTEGER PRIMARY KEY CHECK(id=1),document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_policy_history(version INTEGER PRIMARY KEY,changed_at REAL NOT NULL,document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_archives(article_id INTEGER PRIMARY KEY,document TEXT NOT NULL);
@@ -318,6 +321,7 @@ impl Store {
         value.cooldown_until = old.unwrap_or(0.);
         let text = serde_json::to_string(&value)?;
         tx.execute("INSERT INTO wb_policy VALUES(1,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document",[&text])?;
+        tx.execute("UPDATE push_monitor SET document=json_set(document,'$.next_fetch_at',0,'$.reason',NULL) WHERE id=1 AND json_extract(document,'$.active')=1 AND COALESCE(json_extract(document,'$.next_fetch_at'),0)>0",[])?;
         tx.execute(
             "INSERT INTO wb_policy_history VALUES(?,?,?)",
             params![value.version, now(), text],
@@ -871,7 +875,7 @@ impl Store {
         Ok(ids)
     }
     pub fn wb_archive_create(&self, _ids: Vec<i64>) -> Result<i64> {
-        anyhow::bail!("ZIP 归档已移除，请使用正文下载或 Markdown 导出")
+        anyhow::bail!("ZIP 归档已移除，请使用文章下载或 Markdown 导出")
     }
     /// 全库计数，不依赖首页快照缓存，也不受前端分页限制。
     pub fn wb_source_counts(&self) -> Result<std::collections::HashMap<String, i64>> {
@@ -1542,7 +1546,7 @@ impl Store {
         ts: f64,
     ) -> Result<Permit> {
         ensure!(
-            ["list", "body", "image"].contains(&category),
+            ["list", "body", "image", "webpage"].contains(&category),
             "未知请求类别"
         );
         let mut conn = self.conn();
@@ -1553,7 +1557,26 @@ impl Store {
             })
             .optional()?
             .unwrap_or_default();
-        let previous:Option<f64>=tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category')=?",[category],|r|r.get(0))?;
+        let push = purpose == crate::workbench::push_monitor::PURPOSE;
+        ensure!(
+            push == (category == crate::workbench::push_monitor::CATEGORY),
+            "网页解析请求类别与用途不匹配"
+        );
+        if push {
+            let text: String =
+                tx.query_row("SELECT document FROM push_monitor WHERE id=1", [], |r| {
+                    r.get(0)
+                })?;
+            let run: crate::workbench::push_monitor::Run = serde_json::from_str(&text)?;
+            ensure!(run.active && run.id == owner, "推送监测已停止");
+        }
+        let article = ["body", crate::workbench::push_monitor::CATEGORY].contains(&category);
+        // 包含旧版 body/push_metadata 和新版 webpage，历史请求不用重写。
+        let previous: Option<f64> = if article {
+            tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category') IN ('body','webpage')", [], |r| r.get(0))?
+        } else {
+            tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category')=?", [category], |r| r.get(0))?
+        };
         let native_previous: Option<f64> = if category == "list" {
             tx.query_row("SELECT MAX(ts) FROM native_call_log", [], |r| r.get(0))?
         } else {
@@ -1565,13 +1588,32 @@ impl Store {
             .max_by(f64::total_cmp);
         let gap = match category {
             "list" => crate::rng::between(p.list_min_ms, p.list_max_ms),
-            "body" => p.body_gap_ms,
+            "body" | "webpage" => p.body_gap_ms,
             _ => p.image_gap_ms,
         };
-        let mut next = last
-            .map_or(ts, |v| v + gap as f64 / 1000.)
-            .max(p.cooldown_until);
-        let mut reason = (next > ts).then(|| "请求间隔或全局冷却".to_string());
+        let (slot, mut next) = if article {
+            request_slots::available(&tx, p.body_workers, gap, ts)?
+        } else {
+            (None, last.map_or(ts, |v| v + gap as f64 / 1000.))
+        };
+        if !push {
+            next = next.max(p.cooldown_until);
+        }
+        let mut reason = (next > ts).then(|| {
+            if push {
+                "文章请求工作位正在执行或等待完成后的间隔"
+            } else {
+                "请求间隔或全局冷却"
+            }
+            .to_string()
+        });
+        if article {
+            let (count, oldest) = article_window(&tx, ts - 86400.)?;
+            if count >= p.body_daily_budget {
+                next = next.max(oldest.unwrap_or(ts) + 86400. + 0.01);
+                reason = Some("近24小时文章下载预算用完，待处理文章已保留".into());
+            }
+        }
         if category == "list" {
             let (count,oldest):(i64,Option<f64>)=tx.query_row("SELECT COUNT(*),MIN(t) FROM (SELECT json_extract(document,'$.started_at') t FROM wb_requests WHERE json_extract(document,'$.category')='list' UNION ALL SELECT ts FROM native_call_log) WHERE t>?",[ts-86400.],|r|Ok((r.get(0)?,r.get(1)?)))?;
             if count >= p.list_daily_budget {
@@ -1600,6 +1642,8 @@ impl Store {
             owner_id: owner,
             owner_kind: if purpose.starts_with("cursor_") {
                 "experiment"
+            } else if purpose == crate::workbench::push_monitor::PURPOSE {
+                "push_monitor"
             } else {
                 "task"
             }
@@ -1610,12 +1654,18 @@ impl Store {
             outcome: "pending".into(),
             policy_version: p.version,
             gap_ms: last.map(|v| ((ts - v) * 1000.) as i64),
-            detail: json!({"min_ms":if category=="list"{p.list_min_ms}else{gap},"max_ms":gap}),
+            detail: json!({"min_ms":if category=="list"{p.list_min_ms}else{gap},"max_ms":gap,"worker_slot":slot}),
         };
         tx.execute(
             "INSERT INTO wb_requests VALUES(?,?)",
             params![id, serde_json::to_string(&event)?],
         )?;
+        if let Some(slot) = slot {
+            tx.execute(
+                "UPDATE wb_article_slots SET request_id=? WHERE slot=?",
+                params![id, slot],
+            )?;
+        }
         super::system_logs::write(
             &tx,
             request_module(&event),
@@ -1639,6 +1689,10 @@ impl Store {
             })?;
         let changed=tx.execute("UPDATE wb_requests SET document=json_set(document,'$.outcome',?,'$.finished_at',?,'$.detail',json_patch(json_extract(document,'$.detail'),json(?))) WHERE id=? AND json_extract(document,'$.outcome')='pending'",params![outcome,ts,serde_json::to_string(&detail)?,id])?;
         if changed > 0 {
+            tx.execute(
+                "UPDATE wb_article_slots SET request_id=NULL,finished_at=? WHERE request_id=?",
+                params![ts, id],
+            )?;
             let mut context = request_context(&event);
             context["duration_ms"] = json!(((ts - event.started_at) * 1000.).max(0.));
             context["outcome"] = json!(outcome);
@@ -1648,7 +1702,11 @@ impl Store {
             super::system_logs::write(
                 &tx,
                 request_module(&event),
-                if outcome == "ok" { "info" } else { "warn" },
+                if ["ok", "redirect"].contains(&outcome) {
+                    "info"
+                } else {
+                    "warn"
+                },
                 "请求已完成，业务页面是否入库以页面保存记录为准",
                 context,
             )?;
@@ -1726,8 +1784,12 @@ impl Store {
             requests,
             policy: self.wb_policy()?,
             list_calls_24h: count,
+            article_calls_24h: self.wb_article_window(since)?.0,
             archives: self.wb_archives()?,
         })
+    }
+    pub fn wb_article_window(&self, since: f64) -> Result<(i64, Option<f64>)> {
+        article_window(&self.conn(), since)
     }
     pub fn wb_list_window(&self, since: f64) -> Result<(i64, Option<f64>)> {
         Ok(self.conn().query_row("SELECT COUNT(*),MIN(t) FROM (SELECT json_extract(document,'$.started_at') t FROM wb_requests WHERE json_extract(document,'$.category')='list' UNION ALL SELECT ts FROM native_call_log) WHERE t>?",[since],|r|Ok((r.get(0)?,r.get(1)?)))?)
@@ -1801,6 +1863,7 @@ impl Store {
             )?;
         }
         tx.execute("UPDATE wb_requests SET document=json_set(document,'$.outcome','interrupted','$.finished_at',?) WHERE json_extract(document,'$.outcome')='pending'",[ts])?;
+        tx.execute("UPDATE wb_article_slots SET request_id=NULL,finished_at=? WHERE request_id IS NOT NULL",[ts])?;
         tx.commit()?;
         Ok(())
     }
@@ -1873,7 +1936,9 @@ fn unfinished_download_ids(tx: &Transaction<'_>) -> Result<HashSet<i64>> {
     Ok(result)
 }
 fn request_module(event: &RequestEvent) -> &str {
-    if event.owner_kind == "experiment" {
+    if event.owner_kind == "push_monitor" {
+        "push_monitor"
+    } else if event.owner_kind == "experiment" {
         "experiment"
     } else if event.category == "list" {
         "history"
@@ -1885,6 +1950,8 @@ fn request_context(event: &RequestEvent) -> Value {
     let mut value = json!({"request_id":event.id,"biz":event.biz,"category":event.category,"purpose":event.purpose,"policy_version":event.policy_version});
     value[if event.owner_kind == "experiment" {
         "experiment_id"
+    } else if event.owner_kind == "push_monitor" {
+        "monitor_run_id"
     } else {
         "task_id"
     }] = json!(event.owner_id);
@@ -1930,7 +1997,7 @@ fn enqueue_download(
         tx,
         "archive",
         "info",
-        "正文下载请求已去重并加入队列",
+        "文章下载请求已去重并加入队列",
         json!({"task_id":receipt.task_id,"requested":receipt.requested,"queued":receipt.queued,"already_downloaded":receipt.already_downloaded,"already_queued":receipt.already_queued}),
     )?;
     Ok(receipt)
@@ -1964,6 +2031,13 @@ fn create_task(
         },
     )?;
     Ok(id)
+}
+
+pub(super) fn article_window(
+    conn: &rusqlite::Connection,
+    since: f64,
+) -> Result<(i64, Option<f64>)> {
+    Ok(conn.query_row("SELECT COUNT(*),MIN(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category') IN ('body','webpage') AND json_extract(document,'$.started_at')>?",[since],|r|Ok((r.get(0)?,r.get(1)?)))?)
 }
 
 #[cfg(test)]
