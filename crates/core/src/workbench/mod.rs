@@ -2,6 +2,7 @@
 pub mod archive;
 pub mod discovery;
 pub mod engine;
+mod export_html;
 pub mod markdown_export;
 pub mod push_monitor;
 #[cfg(test)]

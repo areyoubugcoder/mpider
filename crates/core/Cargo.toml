@@ -49,6 +49,8 @@ regex = "1.11.3"
 
 # 文章正文 HTML → Markdown（独立解析库，移植自 Python wechat-article-parser）
 article-md = { path = "../article-md" }
+# 高保真 HTML 正文同时生成使用同一本地图片路径的 Markdown。
+htmd = "0.2.2"
 
 # RPA：剪贴板（mac/win 把种子链接放剪贴板，配合 osascript/人工粘贴送进微信）
 # 只需文本剪贴板，关掉 image-data 默认特性以免拉进 image/objc2 等一大坨依赖。

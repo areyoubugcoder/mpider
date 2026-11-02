@@ -1,10 +1,13 @@
 //! 将本地文章集合同时导出为 Markdown 与经过清洗的离线 HTML；不执行网络请求。
-use crate::{model::now, ArticleRow, Store};
+use super::export_html;
+#[cfg(test)]
+use crate::model::now;
+use crate::{ArticleRow, Store};
 use anyhow::{ensure, Context, Result};
-use scraper::{Html, Selector};
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize)]
@@ -55,7 +58,7 @@ fn source_name(store: &Store, biz: &str) -> Result<String> {
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| biz.to_string()))
 }
-fn source_url(value: &str) -> String {
+pub(super) fn source_url(value: &str) -> String {
     let Ok(mut url) = url::Url::parse(value) else {
         return String::new();
     };
@@ -79,57 +82,13 @@ fn source_url(value: &str) -> String {
     url.to_string()
 }
 
-fn escaped(value: &str) -> String {
+pub(super) fn escaped(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
-}
-
-/// 与 Markdown 使用同一份已解析正文；不导出页面脚本、样式或原始响应。
-fn article_html(title: &str, markdown: &str, directory: &Path) -> Result<String> {
-    let options = pulldown_cmark::Options::ENABLE_TABLES
-        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
-        | pulldown_cmark::Options::ENABLE_TASKLISTS;
-    let mut body = String::new();
-    pulldown_cmark::html::push_html(
-        &mut body,
-        pulldown_cmark::Parser::new_ext(markdown, options),
-    );
-    let parsed = Html::parse_fragment(&body);
-    body = parsed.root_element().inner_html();
-    let image = regex::Regex::new(r"^images/[a-f0-9]+\.(png|jpg|gif|webp|avif)$")?;
-    for node in parsed.select(&Selector::parse("img").unwrap()) {
-        let src = node.value().attr("src").unwrap_or_default();
-        let replacement = if image.is_match(src) && directory.join(src).is_file() {
-            format!(
-                "<img src=\"{}\" alt=\"{}\" loading=\"lazy\">",
-                escaped(src),
-                escaped(node.value().attr("alt").unwrap_or_default())
-            )
-        } else {
-            "<p>［图片未保存在本地，HTML 不自动加载远程图片］</p>".into()
-        };
-        body = body.replace(&node.html(), &replacement);
-    }
-    let body = ammonia::Builder::default()
-        .url_relative(ammonia::UrlRelative::PassThrough)
-        .attribute_filter(|element, attribute, value| {
-            if element == "a" && attribute == "href" {
-                let sanitized = source_url(value);
-                return (!sanitized.is_empty()).then(|| sanitized.into());
-            }
-            Some(value.into())
-        })
-        .clean(&body)
-        .to_string();
-    Ok(html_shell(title, &body))
-}
-
-fn html_shell(title: &str, body: &str) -> String {
-    format!("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"referrer\" content=\"no-referrer\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\"><title>{}</title><style>body{{max-width:840px;margin:32px auto;padding:0 20px;font:16px/1.8 system-ui;overflow-wrap:anywhere}}img{{max-width:100%;height:auto}}pre{{overflow:auto;padding:12px;background:#f5f5f5}}code{{font-family:monospace}}table{{border-collapse:collapse}}td,th{{border:1px solid #ddd;padding:6px 10px}}a{{color:#245a9a}}blockquote{{margin-left:0;padding-left:16px;border-left:3px solid #ddd;color:#666}}</style></head><body>{body}</body></html>", escaped(title))
 }
 
 /// 打开目录选择前验证全部正文，避免用户选完路径才发现无法导出。
@@ -209,7 +168,7 @@ pub fn export_articles_with_progress(
 fn export_rows(
     store: &Store,
     root: &Path,
-    articles: Vec<ArticleRow>,
+    mut articles: Vec<ArticleRow>,
     biz: Option<&str>,
     destination: &Path,
     on_progress: &dyn Fn(ExportProgress),
@@ -219,11 +178,37 @@ fn export_rows(
     ensure!(destination.is_dir(), "请选择文件夹");
     ensure!(!articles.is_empty(), "没有可导出的已入库文章");
     let export_ids: Vec<i64> = articles.iter().map(|article| article.id).collect();
-    let hash = format!("{:x}", Sha256::digest(biz.unwrap_or("selected").as_bytes()));
-    let stem = format!("mp-articles-{}-{}", &hash[..12], (now() * 1000.) as u64);
+    articles.sort_by(|a, b| {
+        b.published_at
+            .partial_cmp(&a.published_at)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
+    let nickname = match biz {
+        Some(biz) => source_name(store, biz)?,
+        None => "所选文章".into(),
+    };
+    let years: Vec<_> = articles
+        .iter()
+        .filter_map(|a| {
+            a.published_at
+                .and_then(|t| chrono::DateTime::from_timestamp(t as i64, 0))
+                .map(|d| (d + chrono::Duration::hours(8)).format("%Y").to_string())
+        })
+        .collect();
+    let span = match (years.iter().min(), years.iter().max()) {
+        (Some(a), Some(b)) if a == b => format!("_{a}"),
+        (Some(a), Some(b)) => format!("_{a}-{b}"),
+        _ => String::new(),
+    };
+    let stem = format!("{}{span}", export_html::safe_name(&nickname, 40));
     let (stage, published) = (0..1000)
         .find_map(|n| {
-            let published = destination.join(format!("{stem}-{n}"));
+            let published = destination.join(if n == 0 {
+                stem.clone()
+            } else {
+                format!("{stem}_{n}")
+            });
             let stage = destination.join(format!(".{stem}-{n}.tmp"));
             if published.exists() {
                 return None;
@@ -253,166 +238,235 @@ fn export_rows(
         missing_body: 0,
         partial_images: 0,
     };
+    std::fs::create_dir_all(stage.join("articles"))?;
+    std::fs::create_dir_all(stage.join("images"))?;
     on_progress(ExportProgress {
         completed: 0,
         total: result.total,
     });
-    let nickname = match biz {
-        Some(biz) => source_name(store, biz)?,
-        None => "所选文章".into(),
-    };
-    let mut index = format!(
-        "# {}\n\n共 {} 篇已下载文章。\n\n",
-        plain(&nickname),
-        articles.len()
-    );
-    let mut html_index = format!(
-        "<h1>{}</h1><p>共 {} 篇已下载文章，同时提供 Markdown 和 HTML。</p><ul>",
-        escaped(&nickname),
-        articles.len()
-    );
-    let mut manifest = Vec::new();
     let image_name = regex::Regex::new(r"^[a-f0-9]+\.(png|jpg|gif|webp|avif)$")?;
-    let image_link =
+    let md_image =
         regex::Regex::new(r"!\[[^\]]*\]\((images/[a-f0-9]+\.(?:png|jpg|gif|webp|avif))\)")?;
-    for row in articles {
+    let remote_md_image = regex::Regex::new(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")?;
+    let any_image = regex::Regex::new(r"(!\[[^\]]*\]\()([^\s)]+)(\))")?;
+    let mut rows = String::new();
+    let mut manifest = String::from("\u{feff}sn,标题,发布时间,原文链接,类型,正文状态\r\n");
+    let mut dates = Vec::new();
+    for (seq, row) in articles.into_iter().enumerate() {
         let article_nickname = source_name(store, &row.biz)?;
-        let target = stage.join("articles").join(row.id.to_string());
-        std::fs::create_dir_all(&target)?;
-        let record = store.wb_archive(row.id)?;
-        let mut state = "missing_body";
-        let mut missing_images = 0;
         let mut markdown = None;
+        let mut images = HashMap::new();
+        let mut raw = store.wb_cached_html(row.id)?;
+        let mut partial = false;
+        let record = store.wb_archive(row.id)?;
         if let Some(record) = record.filter(|r| ["complete", "partial"].contains(&r.state.as_str()))
         {
             let dir = root.join("archive/articles").join(row.id.to_string());
-            // 任一层链接都不跟随；只拷贝已知正文和图片，不导出原始响应或保护材料。
-            for ancestor in [
-                root.to_path_buf(),
-                root.join("archive"),
-                root.join("archive/articles"),
-                dir.clone(),
-            ] {
-                local_dir(&ancestor)?;
-            }
-            ensure!(
-                Path::new(&record.directory).canonicalize()? == dir.canonicalize()?,
-                "归档目录不匹配"
-            );
-            let md = dir.join("article.md");
-            if md.exists() {
-                local_regular(&md)?;
-                markdown = Some(std::fs::read_to_string(md)?);
-                state = if record.state == "complete" {
-                    "complete"
-                } else {
-                    "partial"
-                };
-                missing_images = record.missing_images.len();
-                let images = dir.join("images");
-                if images.exists() {
-                    local_dir(&images)?;
-                    for entry in std::fs::read_dir(images)? {
+            // A database copied from another computer may have no matching archive on this machine.
+            // In that case use the stored body; never follow the foreign absolute path.
+            if dir.exists() {
+                for ancestor in [
+                    root.to_path_buf(),
+                    root.join("archive"),
+                    root.join("archive/articles"),
+                    dir.clone(),
+                ] {
+                    local_dir(&ancestor)?;
+                }
+                ensure!(
+                    Path::new(&record.directory).canonicalize()? == dir.canonicalize()?,
+                    "归档目录不匹配"
+                );
+                let md = dir.join("article.md");
+                if md.exists() {
+                    local_regular(&md)?;
+                    markdown = Some(std::fs::read_to_string(md)?);
+                }
+                if raw.as_ref().is_none_or(|s| s.trim().is_empty())
+                    && dir.join("original.html").exists()
+                {
+                    local_regular(&dir.join("original.html"))?;
+                    raw = Some(std::fs::read_to_string(dir.join("original.html"))?);
+                }
+                partial = !record.missing_images.is_empty() || record.state == "partial";
+                let source_images = dir.join("images");
+                if source_images.exists() {
+                    local_dir(&source_images)?;
+                    for entry in std::fs::read_dir(source_images)? {
                         let entry = entry?;
                         local_regular(&entry.path())?;
-                        let name = entry.file_name();
-                        ensure!(
-                            image_name.is_match(&name.to_string_lossy()),
-                            "归档图片文件名异常"
-                        );
-                        std::fs::create_dir_all(target.join("images"))?;
-                        std::fs::copy(entry.path(), target.join("images").join(name))?;
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        ensure!(image_name.is_match(&name), "归档图片文件名异常");
+                        let bytes = std::fs::read(entry.path())?;
+                        let ext = entry
+                            .path()
+                            .extension()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned();
+                        let file = format!("{:x}.{ext}", Sha256::digest(&bytes));
+                        let target = stage.join("images").join(&file);
+                        if !target.exists() {
+                            super::archive::atomic_write(&target, &bytes)?;
+                        }
+                        images.insert(format!("images/{name}"), format!("../images/{file}"));
                     }
-                }
-                for cap in image_link.captures_iter(markdown.as_deref().unwrap_or_default()) {
-                    ensure!(
-                        target.join(&cap[1]).is_file(),
-                        "本地图片缺失，请先补齐归档后重新导出"
-                    );
                 }
             }
         }
         if markdown.as_ref().is_none_or(|s| s.trim().is_empty()) {
-            markdown = store.get_article_md(row.id)?.and_then(|(a, m)| {
-                if a.is_deleted == 0 {
-                    m.filter(|s| !s.trim().is_empty())
-                } else {
-                    None
-                }
-            });
-            if markdown.is_some() {
-                state = "stored_markdown";
+            markdown =
+                store
+                    .get_article_md(row.id)?
+                    .and_then(|(a, m)| if a.is_deleted == 0 { m } else { None });
+        }
+        let markdown = markdown
+            .filter(|m| !m.trim().is_empty())
+            .context("文章正文已缺失，请重新下载后导出")?;
+        for cap in md_image.captures_iter(&markdown) {
+            ensure!(
+                images.contains_key(&cap[1]),
+                "本地图片缺失，请先补齐归档后重新导出"
+            );
+        }
+        // Remote Markdown links can use a different size/query from the original data-src.
+        for cap in remote_md_image.captures_iter(&markdown) {
+            if let Some(local) = export_html::local_image(&cap[1], &images) {
+                images.insert(export_html::image_key(&cap[1]), local);
             }
         }
-        let has_body = markdown.as_ref().is_some_and(|s| !s.trim().is_empty());
-        ensure!(has_body, "文章正文已缺失，请重新下载后导出");
-        result.with_body += 1;
-        if state == "partial" {
-            result.partial_images += 1;
-        }
-        let title = plain(row.title.as_deref().unwrap_or("无标题"));
+        let kind = export_html::article_type(raw.as_deref());
+        let title = row
+            .title
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("无标题");
+        let file = format!("{:04}_{}", seq + 1, export_html::safe_name(title, 60));
         let url = source_url(row.content_url.as_deref().unwrap_or_default());
-        let published_at = row
+        let published = row
             .published_at
             .and_then(|t| chrono::DateTime::from_timestamp(t as i64, 0))
-            .map(|d| d.to_rfc3339())
-            .unwrap_or_else(|| "未知".into());
-        let mut doc = format!(
-            "# {title}\n\n- 公众号：{}\n- 作者：{}\n- 发布时间：{published_at}\n- 原文：{url}\n\n",
+            .map(|d| {
+                (d + chrono::Duration::hours(8))
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        if published.len() >= 10 {
+            dates.push(published[..10].to_string());
+        }
+        let original_body = raw
+            .as_deref()
+            .and_then(|html| export_html::body(html, &images));
+        let mut body = original_body.clone().unwrap_or_else(|| {
+            let mut html = String::new();
+            pulldown_cmark::html::push_html(
+                &mut html,
+                pulldown_cmark::Parser::new_ext(
+                    &markdown,
+                    pulldown_cmark::Options::ENABLE_TABLES
+                        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
+                        | pulldown_cmark::Options::ENABLE_TASKLISTS,
+                ),
+            );
+            export_html::clean(&html, &images)
+        });
+        partial |= body.contains("［图片未保存在本地］");
+        if partial {
+            result.partial_images += 1;
+        }
+        if body.trim().is_empty() {
+            body = "<p>正文暂无可显示内容，请查看 Markdown 或原文。</p>".into();
+        }
+        let mut md = match original_body {
+            Some(ref body) => htmd::convert(body).context("无法生成文章 Markdown")?,
+            None => markdown.clone(),
+        };
+        // Replace only image destinations, keeping normal links and code untouched.
+        md = any_image
+            .replace_all(&md, |cap: &regex::Captures<'_>| {
+                let target = export_html::local_image(&cap[2], &images)
+                    .unwrap_or_else(|| cap[2].to_string());
+                format!("{}{target}{}", &cap[1], &cap[3])
+            })
+            .into_owned();
+        let doc = format!(
+            "# {}\n\n- 公众号：{}\n- 发布时间：{published}\n- 原文：{url}\n\n{}{}\n\n---\n\n{}\n",
+            plain(title),
             plain(&article_nickname),
-            plain(row.author.as_deref().unwrap_or("未知"))
-        );
-        if state == "stored_markdown" {
-            doc.push_str("> 已有本地正文，图片可能仍为远程链接。\n\n");
-        }
-        if state == "partial" {
-            doc.push_str(&format!(
-                "> 正文已保存，仍有 {missing_images} 张图片未下载。\n\n"
-            ));
-        }
-        doc.push_str(
-            markdown
-                .as_deref()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or("> 正文尚未下载或不可用。请在软件中下载正文后重新导出。"),
-        );
-        super::archive::atomic_write(&target.join("article.md"), doc.as_bytes())?;
-        super::archive::atomic_write(
-            &target.join("article.html"),
-            article_html(&title, &doc, &target)?.as_bytes(),
-        )?;
-        html_index.push_str(&format!("<li>{} · <a href=\"articles/{}/article.html\">HTML</a> · <a href=\"articles/{}/article.md\">Markdown</a>{}</li>", escaped(&title), row.id, row.id, if state == "partial" { "（正文已保存，缺图）" } else { "" }));
-        index.push_str(&format!(
-            "- [{title}](articles/{}/article.md) · {}\n",
-            row.id,
-            if has_body {
-                if state == "partial" {
-                    "正文已保存，缺图"
-                } else {
-                    "正文已保存"
-                }
+            if partial {
+                "> 正文已保存，部分图片未保存在本地。\n\n"
             } else {
-                "正文缺失"
-            }
-        ));
-        manifest.push(json!({"article_id":row.id,"biz":row.biz,"nickname":article_nickname,"title":row.title,"author":row.author,"published_at":row.published_at,"source_url":url,"state":state,"missing_images":missing_images,"markdown":format!("articles/{}/article.md",row.id),"html":format!("articles/{}/article.html",row.id)}));
+                ""
+            },
+            md,
+            include_str!("export_templates/promotion.md").trim()
+        );
+        super::archive::atomic_write(
+            &stage.join("articles").join(format!("{file}.md")),
+            doc.as_bytes(),
+        )?;
+        super::archive::atomic_write(
+            &stage.join("articles").join(format!("{file}.html")),
+            export_html::article(title, &article_nickname, &published, &url, &kind, &body)
+                .as_bytes(),
+        )?;
+        let mut link = url::Url::parse("https://export.invalid/")?;
+        link.path_segments_mut()
+            .unwrap()
+            .push("articles")
+            .push(&format!("{file}.html"));
+        let href = link.path().to_string();
+        let md_href = href.strip_suffix(".html").unwrap().to_string() + ".md";
+        rows.push_str(&format!("<li data-k=\"{}\"><span class=\"d\">{}</span><span class=\"ti\"><a href=\"{}\">{}</a></span><span class=\"ops\"><a class=\"small\" href=\"{}\">md</a> <a class=\"small\" href=\"{}\" target=\"_blank\" rel=\"noopener\">原文</a></span></li>\n", escaped(&title.to_lowercase()), escaped(published.get(..10).unwrap_or_default()), escaped(href.trim_start_matches('/')), escaped(title), escaped(md_href.trim_start_matches('/')), escaped(&url)));
+        let sn = store.wb_article_sn(row.id)?.unwrap_or_default();
+        manifest.push_str(
+            &[sn.as_str(), title, &published, &url, &kind, "成功"]
+                .map(export_html::csv)
+                .join(","),
+        );
+        manifest.push_str("\r\n");
+        result.with_body += 1;
         on_progress(ExportProgress {
             completed: result.with_body,
             total: result.total,
         });
     }
-    html_index.push_str("</ul>");
-    super::archive::atomic_write(
-        &stage.join("index.html"),
-        html_shell(&nickname, &html_index).as_bytes(),
-    )?;
-    super::archive::atomic_write(&stage.join("index.md"), index.as_bytes())?;
-    super::archive::atomic_write(
-        &stage.join("manifest.json"),
-        &serde_json::to_vec_pretty(
-            &json!({"format_version":2,"formats":["markdown","html"],"created_at":now(),"source":{"biz":biz,"nickname":nickname},"summary":result,"articles":manifest}),
-        )?,
-    )?;
+    dates.sort();
+    let range = dates
+        .first()
+        .zip(dates.last())
+        .map(|(a, b)| format!("{a} ~ {b}"))
+        .unwrap_or_default();
+    let summary = format!(
+        "共 {} 篇{} · 成功 {}",
+        result.total,
+        if range.is_empty() {
+            String::new()
+        } else {
+            format!(" · {range}")
+        },
+        result.with_body
+    );
+    let disclaimer =
+        "文章仅供个人学习、研究和收藏使用，版权归原作者及公众号所有。请勿用于商业用途或公开传播。";
+    let generated = (chrono::Utc::now() + chrono::Duration::hours(8))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let index = export_html::template(
+        include_str!("export_templates/index.html"),
+        &[
+            ("account", &escaped(&nickname)),
+            ("summary", &escaped(&summary)),
+            ("rows", &rows),
+            ("generated", &generated),
+            ("disclaimer", disclaimer),
+        ],
+    );
+    super::archive::atomic_write(&stage.join("index.html"), index.as_bytes())?;
+    super::archive::atomic_write(&stage.join("manifest.csv"), manifest.as_bytes())?;
+    let readme = format!("\u{feff}{nickname} · 公众号文章\r\n共 {} 篇，{range}\r\n\r\n【目录说明】\r\n  index.html      双击用浏览器打开，按发布时间倒序浏览，可搜索标题。\r\n  articles/       每篇文章一个 .html 和一个 .md，文件名格式：序号_标题。\r\n  images/         共享的本地图片，请与 articles/ 保持相对位置。\r\n  manifest.csv    文章清单：sn、标题、发布时间、原文链接、类型、正文状态。\r\n\r\n视频、音乐等保留原文观看或收听提示。未保存的图片显示提示，不自动联网加载。\r\n本次 {} 篇文章存在缺图；可在软件中补齐图片后重新导出。\r\n\r\n【如何另存为 PDF】\r\n用浏览器打开文章，按 Ctrl+P（Mac 为 Command+P），选择另存为 PDF；建议勾选背景图形。\r\n\r\n【版权说明】\r\n{disclaimer}\r\n", result.total, result.partial_images);
+    super::archive::atomic_write(&stage.join("README.txt"), readme.as_bytes())?;
     // 复制期间用户可能删除文章；发布前重新核对整个固定集合。
     validate_selection(store, None, &export_ids)?;
     ensure!(!published.exists(), "导出目录已存在，请重试");
@@ -426,89 +480,92 @@ fn export_rows(
 mod tests {
     use super::*;
     use crate::{workbench::ArchiveRecord, ArticleFields};
+    use scraper::{Html, Selector};
 
-    #[test]
-    fn export_requires_all_bodies_and_preserves_local_images_and_legacy_markdown() {
-        let store = Store::open_in_memory().unwrap();
-        store
-            .upsert_account("FAKE", Some("虚构公众号 / CON"), None)
-            .unwrap();
+    fn temp(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "mpider-md-test-{}-{}",
+            "mpider-export-{name}-{}-{}",
             std::process::id(),
             (now() * 1e6) as u64
         ));
-        let output = root.join("中文导出路径");
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn export_requires_all_bodies_and_uses_reference_layout_with_shared_images() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_account("FAKE", Some("虚构公众号"), None)
+            .unwrap();
+        let root = temp("layout");
+        let output = root.join("导出");
         std::fs::create_dir_all(&output).unwrap();
+        std::fs::write(output.join("user-file"), "保留").unwrap();
         for n in 0..76 {
-            store.upsert_article("FAKE", &n.to_string(),1,&ArticleFields{
-                title:Some(format!("标题: * / CON {n}")),
-                content_md: if n==1 {Some("旧库正文".into())} else {None},
-                content_url:Some("https://mp.weixin.qq.com/s?__biz=FAKE&mid=1&key=SECRET&pass_ticket=PRIVATE&uin=ID".into()),
+            store.upsert_article("FAKE", &n.to_string(), 1, &ArticleFields {
+                title: Some(format!("标题: * / CON {n}")),
+                content_md: if n == 0 { None } else { Some("旧库正文".into()) },
+                content_url: Some("https://mp.weixin.qq.com/s?mid=1&key=SECRET&pass_ticket=PRIVATE&uin=ID".into()),
+                published_at: Some(1792885307.),
                 ..Default::default()
             }).unwrap();
         }
-        store
-            .upsert_article("OTHER", "1", 1, &ArticleFields::default())
-            .unwrap();
-        let id = store.list_articles(Some("FAKE"), -1, 0, false).unwrap()[0].id;
-        let local = root.join("workbench/archive/articles").join(id.to_string());
-        std::fs::create_dir_all(local.join("images")).unwrap();
+        assert!(export_source(&store, &root.join("workbench"), "FAKE", &output).is_err());
+        assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
+        let id = store.upsert_article("FAKE", "0", 1, &ArticleFields {
+            content_md: Some("本地正文\n\n![图](images/abc.png)".into()),
+            content_html: Some(r#"<script>SECRET_RAW</script><div id="js_content" style="visibility:hidden"><section style="text-align:center;color:rgb(1,2,3)"><strong>原始排版正文</strong><img data-src="https://example.test/photo" style="width:45%"></section></div>"#.into()),
+            ..Default::default()
+        }).unwrap();
+        let archive = root.join("workbench/archive/articles").join(id.to_string());
+        std::fs::create_dir_all(archive.join("images")).unwrap();
+        let hash = format!("{:x}", Sha256::digest(b"https://example.test/photo"));
         std::fs::write(
-            local.join("article.md"),
+            archive.join(format!("images/{hash}.png")),
+            b"synthetic-image",
+        )
+        .unwrap();
+        std::fs::write(archive.join("images/abc.png"), b"synthetic-image").unwrap();
+        std::fs::write(
+            archive.join("article.md"),
             "本地正文\n\n![图](images/abc.png)",
         )
         .unwrap();
-        std::fs::write(local.join("images/abc.png"), b"synthetic-image").unwrap();
-        std::fs::write(local.join("original.html"), "不应导出原始HTML").unwrap();
+        std::fs::write(archive.join("original.html"), "PRIVATE_ORIGINAL").unwrap();
         store
             .wb_save_archive(&ArchiveRecord {
                 article_id: id,
-                state: "partial".into(),
-                directory: local.display().to_string(),
-                missing_images: vec!["https://example.test/missing.png".into()],
+                state: "complete".into(),
+                directory: archive.display().to_string(),
+                missing_images: vec![],
                 updated_at: now(),
                 error: None,
             })
             .unwrap();
-        std::fs::write(output.join("user-file.md"), "保留用户文件").unwrap();
-        assert!(export_source(&store, &root.join("workbench"), "FAKE", &output).is_err());
-        assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
-        for n in 0..76 {
-            store
-                .upsert_article(
-                    "FAKE",
-                    &n.to_string(),
-                    1,
-                    &ArticleFields {
-                        content_md: Some("已下载正文".into()),
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-        }
         let progress = std::cell::RefCell::new(Vec::new());
-        let first = export_source_with_progress(
+        let result = export_source_with_progress(
             &store,
             &root.join("workbench"),
             "FAKE",
             &output,
             &|update| {
-                // 上报的每一篇均已写出两种格式，尚未完成时不提前发布导出目录。
                 let stage = std::fs::read_dir(&output)
                     .unwrap()
-                    .map(|entry| entry.unwrap().path())
-                    .find(|path| path.to_string_lossy().ends_with(".tmp"))
+                    .map(|e| e.unwrap().path())
+                    .find(|p| p.to_string_lossy().ends_with(".tmp"))
                     .unwrap();
-                let written = std::fs::read_dir(stage.join("articles"))
-                    .into_iter()
-                    .flatten()
-                    .filter(|entry| {
-                        let path = entry.as_ref().unwrap().path();
-                        path.join("article.md").is_file() && path.join("article.html").is_file()
+                let html = std::fs::read_dir(stage.join("articles"))
+                    .unwrap()
+                    .filter(|e| {
+                        e.as_ref()
+                            .unwrap()
+                            .path()
+                            .extension()
+                            .is_some_and(|e| e == "html")
                     })
                     .count();
-                assert_eq!(written, update.completed);
+                assert_eq!(html, update.completed);
                 progress.borrow_mut().push(update);
             },
         )
@@ -522,51 +579,53 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         );
-        assert_eq!(first.total, 76);
-        assert_eq!(first.with_body, 76);
-        assert_eq!(first.missing_body, 0);
-        assert_eq!(first.partial_images, 1);
-        let dir = Path::new(&first.directory);
+        assert_eq!(result.total, 76);
+        assert_eq!(result.partial_images, 0);
+        let dir = Path::new(&result.directory);
+        let mut entries = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        entries.sort();
         assert_eq!(
-            std::fs::read(dir.join(format!("articles/{id}/images/abc.png"))).unwrap(),
-            b"synthetic-image"
+            entries,
+            [
+                "README.txt",
+                "articles",
+                "images",
+                "index.html",
+                "manifest.csv"
+            ]
         );
-        assert!(!dir.join(format!("articles/{id}/original.html")).exists());
-        let html =
-            std::fs::read_to_string(dir.join(format!("articles/{id}/article.html"))).unwrap();
-        assert!(html.contains("本地正文"));
-        assert!(html.contains("src=\"images/abc.png\""));
-        assert!(html.contains("1 张图片未下载"));
+        assert_eq!(
+            std::fs::read_dir(dir.join("articles")).unwrap().count(),
+            152
+        );
+        assert_eq!(std::fs::read_dir(dir.join("images")).unwrap().count(), 1);
+        let file = dir.join("articles/0001_标题_ _ _ CON 0.html");
+        let html = std::fs::read_to_string(file).unwrap();
+        assert!(html.contains("原始排版正文"));
+        assert!(html.contains("text-align: center"));
+        assert!(html.contains("width: 45%"));
+        assert!(html.contains("../index.html"));
         assert!(!html.contains("SECRET"));
         assert!(!html.contains("PRIVATE"));
-        let html_index = std::fs::read_to_string(dir.join("index.html")).unwrap();
-        assert!(html_index.contains(&format!("articles/{id}/article.html")));
-        assert!(html_index.contains(&format!("articles/{id}/article.md")));
-        let manifest = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
-        assert!(!manifest.contains("SECRET"));
-        assert!(!manifest.contains("PRIVATE"));
-        let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-        assert_eq!(value["format_version"], 2);
-        assert_eq!(value["formats"], json!(["markdown", "html"]));
-        assert_eq!(value["articles"].as_array().unwrap().len(), 76);
-        assert!(value["articles"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|a| a["state"] != "missing_body"));
-        assert!(value["articles"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|a| dir.join(a["html"].as_str().unwrap()).is_file()));
-        let second = export_source(&store, &root.join("workbench"), "FAKE", &output).unwrap();
-        assert_ne!(first.directory, second.directory);
-        assert_eq!(
-            std::fs::read_to_string(output.join("user-file.md")).unwrap(),
-            "保留用户文件"
-        );
+        let md = std::fs::read_to_string(dir.join("articles/0001_标题_ _ _ CON 0.md")).unwrap();
+        assert!(md.contains("原始排版正文"));
+        assert!(md.contains("../images/"));
+        let index = std::fs::read_to_string(dir.join("index.html")).unwrap();
+        assert!(index.contains("id=\"q\""));
+        assert!(index.contains("共 76 篇"));
+        let csv = std::fs::read_to_string(dir.join("manifest.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 77);
+        assert!(!csv.contains("SECRET"));
         assert!(store.wb_requests(0.).unwrap().is_empty());
-        // 错误的归档路径不能导出，也不遗留本次临时产物。
+        let second = export_source(&store, &root.join("workbench"), "FAKE", &output).unwrap();
+        assert_ne!(second.directory, result.directory);
+        assert_eq!(
+            std::fs::read_to_string(output.join("user-file")).unwrap(),
+            "保留"
+        );
         let before = std::fs::read_dir(&output).unwrap().count();
         let mut bad = store.wb_archive(id).unwrap().unwrap();
         bad.directory = output.display().to_string();
@@ -577,137 +636,120 @@ mod tests {
     }
 
     #[test]
-    fn html_renders_markdown_and_blocks_active_content_and_external_images() {
-        let root = std::env::temp_dir().join(format!(
-            "mpider-html-test-{}-{}",
-            std::process::id(),
-            (now() * 1e6) as u64
-        ));
-        std::fs::create_dir_all(root.join("images")).unwrap();
-        std::fs::write(root.join("images/abc.png"), b"synthetic").unwrap();
-        let markdown = r#"# 标题
-
-**粗体**与[原文](https://mp.weixin.qq.com/s?mid=1&KEY=PRIVATE_KEY&pass_ticket=PRIVATE_TICKET#PRIVATE_FRAGMENT)
-
-|列甲|列乙|
-|---|---|
-|正文|内容|
-
-```rust
-let value = "<script>";
-```
-
-![本地图](images/abc.png)
-![远程图](https://example.test/pixel.png)
-<IMG SRC='images/abc.png' srcset='https://example.test/track.png 2x' onerror='PRIVATE_HANDLER'>
-<img src='../../private/secret.png'>
-<script>PRIVATE_SCRIPT</script><iframe src='https://example.test/frame'></iframe>
-<a href='javascript:PRIVATE_JS'>无效链接</a><input autofocus onfocus='PRIVATE_FOCUS'>
-"#;
-        let html = article_html("<测试 & 标题>", markdown, &root).unwrap();
+    fn html_preserves_styles_and_backgrounds_and_blocks_active_content() {
+        let images = HashMap::from([
+            ("images/abc.png".into(), "../images/abc.png".into()),
+            ("https://example.test/bg".into(), "../images/bg.png".into()),
+        ]);
+        let raw = r#"<script>PRIVATE_SCRIPT</script><div id="js_content"><section style="text-align:center; color:red; visibility:hidden; opacity:0; background-image:url('https://example.test/bg'); padding:12px"><strong>粗体</strong><span style="font-size:24px">大字</span><img data-src="images/abc.png" srcset="https://track.test/pixel" onerror="PRIVATE_HANDLER" style="width:45%"><img src="../../private/secret.png"><iframe src="https://track.test/frame"></iframe><a href="https://mp.weixin.qq.com/s?mid=1&amp;KEY=PRIVATE_KEY&amp;pass_ticket=PRIVATE_TICKET#PRIVATE_FRAGMENT">链接</a><a href="javascript:PRIVATE_JS">无效</a><form><input autofocus onfocus="PRIVATE_FOCUS"></form><div style="background:url('https://track.test/pixel'); position:fixed">正文</div></section></div>"#;
+        let body = export_html::body(raw, &images).unwrap();
+        let html = export_html::article("<测试 & 标题>", "虚构号", "", "", "文章", &body);
         assert!(html.contains("<title>&lt;测试 &amp; 标题&gt;</title>"));
-        assert!(html.contains("<strong>粗体</strong>"));
-        assert!(html.contains("<table>"));
-        assert!(html.contains("<code"));
-        let parsed = Html::parse_document(&html);
-        let images: Vec<_> = parsed.select(&Selector::parse("img").unwrap()).collect();
-        assert_eq!(images.len(), 2);
-        assert!(images
-            .iter()
-            .all(|img| img.value().attr("src") == Some("images/abc.png")));
-        assert!(images
-            .iter()
-            .all(|img| img.value().attr("srcset").is_none()));
-        assert!(html.contains("图片未保存在本地"));
+        assert!(html.contains("text-align: center"));
+        assert!(html.contains("font-size: 24px"));
+        assert!(html.contains("../images/bg.png"));
+        assert!(!html.contains("visibility"));
+        assert!(!html.contains("opacity"));
         assert!(!html.contains("PRIVATE_"));
-        assert!(!html.contains("<script>"));
+        assert!(!html.contains("track.test"));
+        assert!(!html.contains("<script"));
         assert!(!html.contains("<iframe"));
-        assert!(html.contains("Content-Security-Policy"));
-        assert!(html.contains("default-src 'none'"));
+        assert!(!html.contains("<input"));
+        assert!(!html.contains("position: fixed"));
         assert!(html.contains("https://mp.weixin.qq.com/s?mid=1"));
+        assert!(html.contains("图片未保存在本地"));
+        let doc = Html::parse_document(&html);
+        let imgs = doc
+            .select(&Selector::parse("img").unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(imgs.len(), 1);
+        assert_eq!(imgs[0].value().attr("src"), Some("../images/abc.png"));
+        assert!(imgs[0].value().attr("srcset").is_none());
+        assert!(html.contains("Content-Security-Policy"));
+        let legacy_url = "https://mmbiz.qpic.cn/mmbiz_jpg/FAKE/640";
+        let legacy_hash = format!("{:x}", Sha256::digest(legacy_url.as_bytes()));
+        let legacy_images = HashMap::from([(
+            format!("images/{legacy_hash}.jpg"),
+            "../images/local.jpg".into(),
+        )]);
+        assert_eq!(
+            export_html::local_image(
+                "https://mmbiz.qpic.cn/mmbiz_jpg/FAKE/0?wx_fmt=jpeg#imgIndex=1",
+                &legacy_images
+            )
+            .as_deref(),
+            Some("../images/local.jpg")
+        );
+        let audio = export_html::clean(
+            r#"<mp-common-mpaudio name="夜读&amp;nbsp;|&amp;nbsp;&amp;lt;标题&amp;gt;"></mp-common-mpaudio>"#,
+            &images,
+        );
+        assert_eq!(
+            Html::parse_fragment(&audio)
+                .root_element()
+                .text()
+                .collect::<String>(),
+            "[音频] 夜读\u{a0}|\u{a0}<标题> 请在原文中收听"
+        );
+        assert!(!audio.contains("&amp;nbsp;"));
+    }
+
+    #[test]
+    fn selected_export_deduplicates_ids_handles_foreign_cache_and_escapes_file_links() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_account("A", Some("虚构甲"), None).unwrap();
+        store.upsert_account("B", Some("虚构乙"), None).unwrap();
+        let a = store
+            .upsert_article(
+                "A",
+                "1",
+                1,
+                &ArticleFields {
+                    title: Some("标题#与%空 格.html".into()),
+                    content_md: Some("甲正文".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let b = store
+            .upsert_article(
+                "B",
+                "2",
+                1,
+                &ArticleFields {
+                    content_md: Some("乙正文".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .wb_save_archive(&ArchiveRecord {
+                article_id: a,
+                state: "complete".into(),
+                directory: "C:\\foreign\\archive".into(),
+                missing_images: vec![],
+                updated_at: now(),
+                error: None,
+            })
+            .unwrap();
+        let root = temp("selected");
+        let result = export_articles(&store, &root.join("workbench"), &[a, b, a], &root).unwrap();
+        assert_eq!(result.total, 2);
+        let index =
+            std::fs::read_to_string(Path::new(&result.directory).join("index.html")).unwrap();
+        assert!(index.contains("%23"));
+        assert!(index.contains("%25"));
+        assert!(index.contains(".html.md"));
+        let md = std::fs::read_to_string(
+            Path::new(&result.directory).join("articles/0001_标题#与%空 格.html.md"),
+        )
+        .unwrap();
+        assert!(md.contains("公众号：虚构甲"));
+        assert!(md.contains("甲正文"));
+        store.wb_delete_articles(vec![b]).unwrap();
+        let before = std::fs::read_dir(&root).unwrap().count();
+        assert!(export_articles(&store, &root.join("workbench"), &[a, b], &root).is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), before);
         std::fs::remove_dir_all(root).unwrap();
     }
-}
-
-#[cfg(test)]
-#[test]
-fn selected_export_deduplicates_cross_source_ids_and_rejects_deleted_rows_before_writing() {
-    use crate::ArticleFields;
-    let store = Store::open_in_memory().unwrap();
-    store.upsert_account("A", Some("虚构甲"), None).unwrap();
-    store.upsert_account("B", Some("虚构乙"), None).unwrap();
-    let a = store
-        .upsert_article(
-            "A",
-            "1",
-            1,
-            &ArticleFields {
-                content_md: Some("甲正文".into()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    let b = store
-        .upsert_article("B", "2", 1, &ArticleFields::default())
-        .unwrap();
-    let root = std::env::temp_dir().join(format!(
-        "mpider-selected-test-{}-{}",
-        std::process::id(),
-        (now() * 1e6) as u64
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    let before = std::fs::read_dir(&root).unwrap().count();
-    assert!(validate_selection(&store, None, &[a, b]).is_err());
-    assert!(export_articles_with_progress(
-        &store,
-        &root.join("workbench"),
-        &[a, b],
-        &root,
-        &|_| panic!("正文校验失败时不应开始导出或上报进度"),
-    )
-    .is_err());
-    assert_eq!(std::fs::read_dir(&root).unwrap().count(), before);
-    store
-        .upsert_article(
-            "B",
-            "2",
-            1,
-            &ArticleFields {
-                content_md: Some("乙正文".into()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    let progress = std::cell::RefCell::new(Vec::new());
-    let result = export_articles_with_progress(
-        &store,
-        &root.join("workbench"),
-        &[a, b, a],
-        &root,
-        &|update| progress.borrow_mut().push(update),
-    )
-    .unwrap();
-    assert_eq!(
-        *progress.borrow(),
-        (0..=2)
-            .map(|completed| ExportProgress {
-                completed,
-                total: 2
-            })
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(result.total, 2);
-    assert_eq!(result.with_body, 2);
-    assert_eq!(result.missing_body, 0);
-    let doc = std::fs::read_to_string(
-        Path::new(&result.directory).join(format!("articles/{a}/article.md")),
-    )
-    .unwrap();
-    assert!(doc.contains("公众号：虚构甲"));
-    assert!(!doc.contains("公众号：所选文章"));
-    store.wb_delete_articles(vec![b]).unwrap();
-    let before = std::fs::read_dir(&root).unwrap().count();
-    assert!(export_articles(&store, &root.join("workbench"), &[a, b], &root).is_err());
-    assert_eq!(std::fs::read_dir(&root).unwrap().count(), before);
-    std::fs::remove_dir_all(root).unwrap();
 }

@@ -1,0 +1,6 @@
+# CI、发行与本地开发共用同一版本；升级时改这里并单独验证 Clippy。
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc"]

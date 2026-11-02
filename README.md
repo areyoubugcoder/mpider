@@ -13,7 +13,7 @@
 
 [项目官网](https://areyoubugcoder.github.io/mpider/) · [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/8c23uHExcT6) · [进群交流](https://qm.qq.com/q/s4JavFxA3e)
 
-> **v1.0.1 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
+> **v1.0.2 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 
 ## 什么是账号池？有什么风险？
 
@@ -81,7 +81,7 @@ flowchart TD
 | 采集历史文章 | 按追加篇数或截止日期创建任务，支持暂停和检查点续采 |
 | 更新会话后续采 | 按提示手动打开目标主页，完整新会话到齐后继续原任务 |
 | 正文与图片下载 | 单篇、勾选或整号加入统一持久化队列，跳过已有正文 |
-| 离线阅读与导出 | 同时生成 Markdown、HTML、双格式索引、已保存图片和缺图清单 |
+| 离线阅读与导出 | 同时生成 Markdown、保留正文排版的 HTML、可搜索目录、共享图片和 CSV 清单 |
 | 请求与任务管理 | 分别配置列表、正文和图片的间隔、并发与预算，查看请求记录和系统日志 |
 | 客户端更新 | Windows 安装版检查 GitHub 正式版本，预下载并验签，确认后安装与重启 |
 
@@ -97,9 +97,9 @@ flowchart TD
 
 | 下载文件 | 用途 |
 | --- | --- |
-| `MPider_1.0.1_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
-| `MPider_1.0.1_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v1.0.1-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
+| `MPider_1.0.2_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
+| `MPider_1.0.2_x64_zh-CN.msi` | 中文 MSI 安装版 |
+| `MPider-v1.0.2-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
 | `SHA256SUMS` | 核对下载文件的 SHA-256 |
 
 三个客户端包均携带 Python **3.12.10**、Frida **17.23.3**、cryptography **50.0.2** 及所需许可，无需另外安装 Python、Node.js、pnpm 或 Rust。微信和 WebView2 需要自行安装。不要只复制便携包内的 EXE。
@@ -107,7 +107,7 @@ flowchart TD
 安装包附带应用更新签名，用于 MPider 验证更新文件；它不等同于 Windows 开发者代码签名，系统仍可能提示发布者未知。可先核对附件摘要：
 
 ```powershell
-Get-FileHash .\MPider_1.0.1_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\MPider_1.0.2_x64-setup.exe -Algorithm SHA256
 ```
 
 ## 开始采集
@@ -175,7 +175,7 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 
 ## 开发与贡献
 
-开发需要 Node.js **24+**、**pnpm**、Rust stable；Windows 构建还需 Visual Studio C++ Build Tools 与 Windows SDK。改动在独立 Git worktree 中进行：
+开发需要 Node.js **24+**、**pnpm**、Rust（版本见 `rust-toolchain.toml`）；Windows 构建还需 Visual Studio C++ Build Tools 与 Windows SDK。改动在独立 Git worktree 中进行：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -188,7 +188,7 @@ cargo test --locked -p mpider-core -p article-md -p mpider-tauri
 pnpm tauri dev
 ```
 
-Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。日常 CI 在 PR 中按改动路径选择前端、Windows Rust、原生桥或 CI 配置检查，合并到 main 后不重复执行；纯公开资料只运行轻量路径判断与汇总，编入界面的更新记录、FAQ、实验室与请求策略文档仅触发前端检查。共享契约改动联动验证，手动触发可运行全部检查，详细规则见[贡献指南](CONTRIBUTING.md)。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
+Windows 测试 runner、Python 离线测试和完整客户端构建见[Windows 构建说明](docs/windows-standalone.md)。日常 CI 在 PR 中按改动路径选择前端、Windows Rust、原生桥或 CI 配置检查，合并到 main 后按相同规则运行并刷新 Rust 缓存；纯公开资料只运行轻量路径判断与汇总，编入界面的更新记录、FAQ、实验室与请求策略文档仅触发前端检查。共享契约改动联动验证，手动触发可运行全部检查，详细规则见[贡献指南](CONTRIBUTING.md)。客户端发行仅面向 Windows x64，标签必须与项目版本一致，完成构建、离线测试、便携包解压自检与签名清单生成后创建 Release 草稿。
 
 [贡献指南](CONTRIBUTING.md) · [实现原理](docs/how-it-works.md) · [更新记录](CHANGELOG.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 

@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- Rust stable、Node.js 24+、pnpm 9+；只使用 pnpm，保留 `pnpm-lock.yaml`。
+- Rust（版本由 `rust-toolchain.toml` 固定，rustup 自动安装）、Node.js 24+、pnpm（版本由 `package.json` 的 `packageManager` 固定）；只使用 pnpm，保留 `pnpm-lock.yaml`。
 - 原生桥离线测试使用 Python 3.12，依赖固定在 `native/requirements.txt`。
 - Windows 桌面构建还需要 MSVC C++ Build Tools、Windows SDK 与 WebView2，见[独立运行](docs/windows-standalone.md)。
 - 当前原生采集只验证微信 4.1.15.56 x64。开发构建或跨平台测试通过不代表该平台可采集。
@@ -35,7 +35,7 @@ pnpm test
 
 按改动范围补充有意义的回归。说明实际运行的平台、命令与结果，区分离线测试、桌面启动、真实请求和长期观察；没有验证的部分明确写出。
 
-日常 CI 仅由面向 main 的 PR 或手动操作触发，合并后的普通 main 推送不重复运行。PR 按路径选择任务：
+日常 CI 由面向 main 的 PR、main 推送或手动操作触发。main 推送按相同路径规则运行并写入 Rust 缓存，PR 只读取缓存。PR 按路径选择任务：
 
 | 改动范围 | 执行的检查 |
 | --- | --- |

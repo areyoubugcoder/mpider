@@ -7,8 +7,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# 只有 publish 需要写权限；构建 job 运行依赖脚本，保持只读。
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -18,33 +19,35 @@ jobs:
   windows:
     name: Windows x64 便携包与更新安装包
     runs-on: windows-latest
+    timeout-minutes: 90
+    # 私钥只进需要的步骤，不暴露给依赖安装、构建脚本和测试。
     env:
       MPIDER_UPDATER_PUBLIC_KEY: ${{ vars.MPIDER_UPDATER_PUBLIC_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: 9
-      - uses: actions/setup-node@v7.1.0
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-python@v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
+      - name: 安装 rust-toolchain.toml 固定的工具链
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: release-windows-x64
           workspaces: . -> target
           cache-on-failure: true
+          # 标签之间不共享缓存；main 上的手动预演写入，标签只读取。
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: 核对当前项目版本、标签与更新签名
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: node tools/release-updater.mjs prepare
 
       - name: 安装验证依赖
@@ -52,11 +55,12 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm install --frozen-lockfile
           python -m pip install -r native/requirements.txt
-      - name: 发行许可预检
+      - name: 发行依赖与许可预检
         shell: pwsh
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           python tools/collect-third-party-licenses.py --output (Join-Path $env:RUNNER_TEMP 'mpider-license-preflight') --cache dist-windows/.downloads
+          python tools/package-windows-release.py --prefetch --output dist-windows
       - name: 类型、格式与 Rust 静态检查
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
@@ -110,6 +114,9 @@ jobs:
 
       - name: 构建带运行环境的 NSIS 与 MSI 安装包
         shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           # 与便携包共用 Windows x64 runner 的原生 target/release，复用已编译依赖。
@@ -128,7 +135,7 @@ jobs:
           $sums | Set-Content release-assets/SHA256SUMS -Encoding ascii
 
       - name: 留存完整发行包与验收记录
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mpider-windows-x64
           if-no-files-found: error
@@ -137,7 +144,7 @@ jobs:
 
       - name: 失败时留存已生成文件以便排查
         if: failure()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mpider-windows-partial
           if-no-files-found: warn
@@ -154,12 +161,17 @@ jobs:
     if: github.ref_type == 'tag'
     needs: windows
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - uses: actions/download-artifact@v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: mpider-windows-x64
           path: release-assets

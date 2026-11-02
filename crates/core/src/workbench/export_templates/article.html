@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>{{title}}</title>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+body{margin:0;background:#f6f6f6;color:#222;font:17px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.wrap{max-width:720px;margin:0 auto;background:#fff;padding:32px 22px 48px;min-height:100vh}
+h1.t{font-size:24px;line-height:1.4;margin:0 0 12px}
+.meta{color:#888;font-size:14px;margin-bottom:24px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.meta a{color:#576b95}
+.nav{font-size:14px;margin-bottom:16px}
+.nav a{color:#576b95;text-decoration:none}
+.content{overflow-wrap:break-word;word-break:break-word}
+.content img{max-width:100%!important;height:auto!important}
+.content section,.content p{max-width:100%}
+.content table{max-width:100%;border-collapse:collapse}
+.content pre{white-space:pre-wrap}
+.mph-media{color:#888;font-size:14px;background:#f3f3f3;padding:8px 12px;border-radius:6px}
+.foot{margin-top:40px;padding-top:16px;border-top:1px solid #eee;color:#aaa;font-size:12px}
+.foot .promo{margin:12px 0 0;color:#666;font-size:14px;line-height:1.8}
+.foot .promo a{color:#576b95;text-decoration:none}
+.foot .promo a:hover{text-decoration:underline}
+@media (prefers-color-scheme:dark){body{background:#111;color:#ddd}.wrap{background:#1b1b1b}.foot{border-color:#333}.foot .promo{color:#aaa}.foot .promo a{color:#9aafd4}}
+@media print{body{background:#fff}.wrap{max-width:none;padding:0}.nav,.foot{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="../index.html">← 返回目录</a></div>
+<h1 class="t">{{title}}</h1>
+<div class="meta"><span>{{account}}</span><span>{{publishTime}}</span>{{type}}<a href="{{url}}" target="_blank" rel="noopener">原文链接</a></div>
+<div class="content">
+{{body}}
+</div>
+<div class="foot">本文由 mpider 保存，仅供个人学习、研究和收藏，版权归原作者及公众号所有。<p class="promo">{{promotion}}</p></div>
+</div>
+</body>
+</html>
