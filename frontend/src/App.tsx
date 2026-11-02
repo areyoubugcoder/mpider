@@ -20,7 +20,7 @@ import { CursorLab } from "@/views/CursorLab";
 import { SystemLogs } from "@/views/SystemLogs";
 import { Faq } from "@/views/Faq";
 import { PushMonitor } from "@/views/PushMonitor";
-import { pushStatus, pushPhase } from "@/lib/push-monitor";
+import { pushStatus, pushPhase, pushQueuePhase } from "@/lib/push-monitor";
 import type { View } from "@/views/types";
 
 export function App() {
@@ -60,7 +60,7 @@ export function App() {
       <ExportQueueBar />
       {!!snapshot.data?.active_queues?.history.task_count && <QueueProgressTrigger queue={snapshot.data.active_queues.history} label="历史采集" hint="点击查看历史采集任务" onClick={()=>{setTaskKind("history");setView("jobs");}} />}</div>
       <HomeSyncStatus snapshot={snapshot.data} />
-      <button type="button" className="shrink-0 hover:text-foreground" onClick={() => setView("push-monitor")} title="查看推送监测">推送监测：{pushPhase(push.data?.run)}</button>
+      <button type="button" className="min-w-0 max-w-64 truncate hover:text-foreground" onClick={() => setView("push-monitor")} title={`查看推送监测 · 扫描：${pushPhase(push.data?.run)} · 处理：${pushQueuePhase(push.data?.run.queue, push.data?.pending)}`}>扫描：{pushPhase(push.data?.run)} · 处理：{pushQueuePhase(push.data?.run.queue, push.data?.pending)}</button>
     </footer><AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} version={health.data?.app_version || bundledVersion} /><Toaster />
   </div></UpdateProvider>;
 }

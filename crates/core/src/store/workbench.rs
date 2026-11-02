@@ -321,7 +321,7 @@ impl Store {
         value.cooldown_until = old.unwrap_or(0.);
         let text = serde_json::to_string(&value)?;
         tx.execute("INSERT INTO wb_policy VALUES(1,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document",[&text])?;
-        tx.execute("UPDATE push_monitor SET document=json_set(document,'$.next_fetch_at',0,'$.reason',NULL) WHERE id=1 AND json_extract(document,'$.active')=1 AND COALESCE(json_extract(document,'$.next_fetch_at'),0)>0",[])?;
+        tx.execute("UPDATE push_monitor SET document=json_set(document,'$.queue.next_fetch_at',0,'$.queue.reason',NULL) WHERE id=1 AND json_extract(document,'$.queue.active')=1 AND COALESCE(json_extract(document,'$.queue.next_fetch_at'),0)>0",[])?;
         tx.execute(
             "INSERT INTO wb_policy_history VALUES(?,?,?)",
             params![value.version, now(), text],
@@ -1568,7 +1568,10 @@ impl Store {
                     r.get(0)
                 })?;
             let run: crate::workbench::push_monitor::Run = serde_json::from_str(&text)?;
-            ensure!(run.active && run.id == owner, "推送监测已停止");
+            ensure!(
+                run.queue.active && run.queue.id == owner,
+                "待处理链接已暂停"
+            );
         }
         let article = ["body", crate::workbench::push_monitor::CATEGORY].contains(&category);
         // 包含旧版 body/push_metadata 和新版 webpage，历史请求不用重写。

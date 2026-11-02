@@ -70,10 +70,20 @@ pub struct Run {
     pub started_at: f64,
     pub last_scan_at: f64,
     pub next_scan_at: f64,
-    pub next_fetch_at: f64,
+    pub queue: QueueRun,
     pub processes: usize,
     pub read_bytes: u64,
     pub rounds: u64,
+    pub reason: Option<String>,
+}
+/// 解析队列有独立运行世代；扫描开关不能取消请求或接受旧处理器的晚到结果。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QueueRun {
+    pub id: i64,
+    pub active: bool,
+    pub phase: String,
+    pub next_fetch_at: f64,
     pub reason: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -471,23 +481,12 @@ pub async fn run(store: Arc<Store>, id: i64) {
 }
 
 pub async fn run_with_scanner<S: Scanner>(store: Arc<Store>, id: i64, scanner: S) -> Result<()> {
-    run_with_scanner_at(store, id, scanner, None).await
-}
-
-// 测试仅覆盖 HTTP 目的地；生产始终使用已验证的文章地址。
-async fn run_with_scanner_at<S: Scanner>(
-    store: Arc<Store>,
-    id: i64,
-    scanner: S,
-    endpoint: Option<&str>,
-) -> Result<()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOCK.lock().await;
-    let client = client()?;
     let cancel = Arc::new(AtomicBool::new(false));
     let mut scanner = Some(scanner);
     let mut task: Option<tokio::task::JoinHandle<(S, Result<Scan>)>> = None;
-    // 扫描在后台进行；已有队列不必等待一轮几十秒的内存扫描结束。
+    // 扫描在后台进行，停止时可及时发出取消信号。
     let result = async {
         while store.push_is_active(id)? {
             if task.as_ref().is_some_and(|task| task.is_finished()) {
@@ -503,13 +502,6 @@ async fn run_with_scanner_at<S: Scanner>(
                     (current, result)
                 }));
             }
-            if let Some(candidate) = store.push_next(id, now())? {
-                if let Some(endpoint) = endpoint {
-                    process_at(&store, &client, id, candidate, endpoint).await?;
-                } else {
-                    process(&store, &client, id, candidate).await?;
-                }
-            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())
@@ -521,6 +513,35 @@ async fn run_with_scanner_at<S: Scanner>(
         let _ = task.await;
     }
     result
+}
+
+/// 显式处理已保存链接，不创建扫描器，也不要求微信进程存在。
+pub async fn run_queue(store: Arc<Store>, id: i64) {
+    if let Err(error) = run_queue_at(store.clone(), id, None).await {
+        let _ = store.push_queue_end(
+            id,
+            "failed",
+            Some(&crate::store::system_logs::safe_text(&error.to_string())),
+        );
+    }
+}
+
+// 测试可注入本机 HTTP fixture；生产使用已验证候选的文章地址。
+async fn run_queue_at(store: Arc<Store>, id: i64, endpoint: Option<&str>) -> Result<()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOCK.lock().await;
+    let client = client()?;
+    while store.push_queue_is_active(id)? {
+        if let Some(candidate) = store.push_next(id, now())? {
+            if let Some(endpoint) = endpoint {
+                process_at(&store, &client, id, candidate, endpoint).await?;
+            } else {
+                process(&store, &client, id, candidate).await?;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(())
 }
 
 async fn process(
@@ -564,7 +585,7 @@ async fn process_at(
         tokio::select! {
             result = &mut response => break result,
             _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                if !store.push_is_active(id)? {
+                if !store.push_queue_is_active(id)? {
                     completion.finish("cancelled", serde_json::json!({}), now())?;
                     return Ok(());
                 }

@@ -38,6 +38,8 @@ async fn main() -> Result<()> {
         store.wb_set_policy(policy)?;
         let id = store.push_start(Config::default())?;
         let runner = tokio::spawn(push_monitor::run(store.clone(), id));
+        let queue_id = store.push_queue_start()?;
+        let queue = tokio::spawn(push_monitor::run_queue(store.clone(), queue_id));
         let until = tokio::time::Instant::now() + std::time::Duration::from_secs(seconds);
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -52,7 +54,9 @@ async fn main() -> Result<()> {
             }
         }
         store.push_end(id, "stopped", None)?;
+        store.push_queue_end(queue_id, "paused", None)?;
         tokio::time::timeout(std::time::Duration::from_secs(30), runner).await??;
+        tokio::time::timeout(std::time::Duration::from_secs(30), queue).await??;
         Ok(())
     }
 }
