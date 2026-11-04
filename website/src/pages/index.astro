@@ -3,6 +3,15 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import faqs from '../config/faqs.json';
 import { product, siteUrl, plainText } from '../lib/site';
 
+const capabilities = [
+  { title: '监测本地微信推送', description: '后台发现并保存本机微信中的文章链接，开启处理后按公众号范围和发布时间筛选、去重入库。扫描与处理独立控制，停止扫描后仍可处理已保存链接。' },
+  { title: '同步公众号最新文章', description: '开启主页识别，在微信中手动打开目标公众号主页完成登记，再按需同步首页文章。自动去重，不影响历史采集进度。' },
+  { title: '按需采集历史文章', description: '按追加篇数或截止日期采集历史，支持暂停和检查点续采。会话过期时，按提示重新打开公众号主页，更新后继续原任务。' },
+  { title: '下载正文与图片', description: '单篇、勾选或整号批量下载，自动跳过已有正文。正文与图片保存在自己的电脑里，可在文章库筛选和离线阅读。' },
+  { title: '导出自己的文章资料库', description: '同时导出 Markdown 和保留正文排版的 HTML，附可搜索目录、共享图片与 CSV 清单。下载完成后，单篇、批量或整号都能导出。' },
+  { title: '掌握任务进度与请求节奏', description: '分别管理首页同步、历史采集与正文下载，查看进度、请求记录和日志。可配置各类请求间隔、正文与图片并发，以及列表与文章请求预算。' },
+];
+
 const schema = [
   { '@type': 'SoftwareApplication', name: product.name, url: siteUrl(), applicationCategory: 'UtilitiesApplication', operatingSystem: 'Windows', downloadUrl: product.download, license: `${product.repository}/blob/main/LICENSE`, description: product.description, offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' } },
   { '@type': 'FAQPage', mainEntity: faqs.map((faq) => ({ '@type': 'Question', name: faq.question, acceptedAnswer: { '@type': 'Answer', text: plainText(faq.answerHtml) } })) },
@@ -23,6 +32,20 @@ const schema = [
           </nav>
           <p class="kp-source"><a href={product.repository} target="_blank" rel="noopener noreferrer">开源项目地址 ↗</a></p>
         </div>
+      </section>
+      <section class="kp-capabilities" id="mpider-capabilities" aria-labelledby="mpider-capabilities-title">
+        <p class="kp-faq-label">功能一览 / v2.0.1</p>
+        <h2 id="mpider-capabilities-title">Mpider 可以做什么</h2>
+        <p class="kp-capabilities-intro">从发现文章到离线归档，把想留下的公众号内容留在自己手里。</p>
+        <ul class="kp-capabilities-grid">
+          {capabilities.map((capability, index) => (
+            <li>
+              <span class="kp-capability-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+              <h3>{capability.title}</h3>
+              <p>{capability.description}</p>
+            </li>
+          ))}
+        </ul>
       </section>
       <section class="kp-faq" id="mpider-risk-faq" aria-labelledby="mpider-faq-title">
         <p class="kp-faq-label">FAQ / 风险与透明</p>
