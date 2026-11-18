@@ -934,8 +934,10 @@ export const deleteJob = (id: number) => invoke<boolean>("delete_job", { id });
 /** 一键清空全部已结束的任务记录（不可恢复；进行中的保留）。返回删掉的条数。 */
 export const clearJobs = () => invoke<number>("clear_jobs");
 
-export const listArticles = (biz?: string, limit?: number, offset?: number) =>
-  invoke<ArticlePage>("list_articles", { biz: biz ?? null, limit, offset });
+export const listArticles = (biz?: string, limit?: number, offset?: number, title?: string, downloaded?: boolean) =>
+  invoke<ArticlePage>("list_articles", { biz: biz ?? null, limit, offset, title: title ?? null, downloaded: downloaded ?? null });
+export const articleSelectionIds = (biz?: string, title?: string, downloaded?: boolean) =>
+  invoke<number[]>("article_selection_ids", { biz: biz ?? null, title: title ?? null, downloaded: downloaded ?? null });
 export const getArticleDetail = (id: number) =>
   invoke<ArticleDetail>("get_article_detail", { id });
 export const articleCounts = () => invoke<ArticleCounts>("article_counts");

@@ -24,7 +24,7 @@ import { canCancelTask, sourceBodyAction } from "@/lib/action-visibility";
 import { relativeTime } from "@/lib/relative-time";
 import { recoveryIsWaiting, recoveryMessage } from "@/lib/home-sync";
 import { Popover, PopoverTrigger, PopoverContent, PopoverClose } from "@/components/ui/popover";
-import { coreHealth, nativeEnvironment, getArticleDetail, openExternal, listArticles, listAccounts, revealInFolder, listLogs, sysproxyResetStale, DEFAULT_CFG } from "@/lib/tauri";
+import { coreHealth, nativeEnvironment, getArticleDetail, openExternal, listArticles, articleSelectionIds, listAccounts, revealInFolder, listLogs, sysproxyResetStale, DEFAULT_CFG } from "@/lib/tauri";
 import { logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage, requestPage, downloadArticles, exportArticles, deleteArticles, deleteSource, downloadSourceBodies, exportSourceArticles, syncSourceHome, createHistory, readArchive, savePolicy, exportRequests, pythonPath, type Policy, type Task, type DownloadReceipt, type MarkdownExport } from "@/lib/workbench";
 
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
@@ -111,11 +111,11 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
             <Popover><PopoverTrigger asChild><TextAction disabled={busy}>导出所有文章</TextAction></PopoverTrigger><PopoverContent aria-label={`导出${s.nickname}所有文章`}>
               <p className="text-sm font-medium">导出所有文章</p><p className="mt-2 text-sm text-muted-foreground">导出该公众号本地已入库的全部 {articleCount} 篇文章，包含所有分页。同时生成 Markdown 和 HTML，并附带已保存的图片。</p>
               {bodyAction !== null && <p className="mt-2 text-xs text-muted-foreground">已下载文章 {s.body_count} / {articleCount} 篇。</p>}
-              {bodyAction === "download" && <p role="status" className="mt-2 text-xs text-warning">还有 {articleCount - s.body_count} 篇正文未下载，请先下载，完成后再导出。</p>}
+              {bodyAction === "download" && <p role="status" className="mt-2 text-xs text-warning">还有 {articleCount - s.body_count} 篇正文未下载，导出时将自动跳过。</p>}
               {bodyAction === null && <p role="status" className="mt-2 text-xs text-muted-foreground">{articleCount === 0 ? "暂无可导出的文章，请先同步最新文章或采集历史文章。" : "暂时无法确认文章下载状态，请稍后重试。"}</p>}
               <div className="mt-4 flex flex-wrap gap-2">
                 {bodyAction === "download" && <PopoverClose asChild><Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showDownloadReceipt(await downloadSourceBodies(s.biz)))}>下载未完成文章</Button></PopoverClose>}
-                <PopoverClose asChild><Button size="sm" disabled={busy || bodyAction !== "export"} onClick={() => run(async () => showExportResult(await exportSourceArticles(s.biz)))}>选择导出路径</Button></PopoverClose>
+                <PopoverClose asChild><Button size="sm" disabled={busy || bodyAction === null || s.body_count === 0} onClick={() => run(async () => showExportResult(await exportSourceArticles(s.biz)))}>选择导出路径</Button></PopoverClose>
               </div>
             </PopoverContent></Popover>
             <TaskMoreActions tasks={[{task:home,label:"取消首页同步"},{task:history,label:"取消历史采集"}]} busy={busy} run={run}><DropdownMenuItem className="text-destructive focus:text-destructive" disabled={busy} onSelect={() => setDeletingSource({biz:s.biz,nickname:s.nickname,article_count:s.article_count})}>删除公众号</DropdownMenuItem></TaskMoreActions>
@@ -165,18 +165,21 @@ function showDownloadReceipt(result: DownloadReceipt) {
   toast.success(result.queued ? `已加入下载队列 ${result.queued} 篇` : "无需新增下载任务", { description: `已下载跳过 ${result.already_downloaded} 篇 · 已在队列 ${result.already_queued} 篇` });
 }
 function showExportResult(result: MarkdownExport | null) {
-  if (result) toast.success(`已导出 ${result.total} 篇 · Markdown 和 HTML`, { description: result.directory, duration: 12000, action: { label: "打开目录", onClick: () => { void revealInFolder(`${result.directory}/index.html`).catch(e => toast.error(String(e))); } } });
+  if (result) toast.success(`已导出 ${result.with_body} 篇 · Markdown 和 HTML`, { description: `${result.missing_body ? `跳过 ${result.missing_body} 篇缺正文文章 · ` : ""}${result.directory}`, duration: 12000, action: { label: "打开目录", onClick: () => { void revealInFolder(`${result.directory}/index.html`).catch(e => toast.error(String(e))); } } });
 }
 export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz:string)=>void}) {
   const snapshot = useSnapshot(); const { busy, run } = useAction();
   const [page, setPage] = useState(0); const [pageSize,setPageSize]=useState(DEFAULT_PAGE_SIZE); const [selected, setSelected] = useState<number[]>([]);
   const [deleting, setDeleting] = useState<number[] | null>(null);
   const [reader, setReader] = useState<{ title: string; html?: string; markdown?: string } | null>(null);
+  const [title, setTitle] = useState("");
+  const [downloadStatus, setDownloadStatus] = useState("");
+  const downloaded = downloadStatus === "" ? undefined : downloadStatus === "downloaded";
   const accounts = useQuery({ queryKey: ["article-accounts"], queryFn: () => listAccounts() });
-  const articles = useQuery({ queryKey: ["articles", biz, page, pageSize], queryFn: () => listArticles(biz || undefined, pageSize, page * pageSize), refetchInterval: 3000 });
+  const articles = useQuery({ queryKey: ["articles", biz, page, pageSize, title, downloadStatus], queryFn: () => listArticles(biz || undefined, pageSize, page * pageSize, title, downloaded), refetchInterval: 3000 });
   const rows = articles.data?.items || []; const total = articles.data?.total || 0;
   const selectedStates = useQuery({queryKey:["selected-article-bodies",selected],queryFn:()=>articleBodyStates(selected),enabled:selected.length>0,refetchInterval:selected.length?3000:false});
-  const selectionReady=!!selected.length && !!selectedStates.data && selected.every(id=>selectedStates.data[id]===true);
+  const selectionReady=!!selected.length && !!selectedStates.data && selected.some(id=>selectedStates.data[id]===true);
   const missingSelected=selectedStates.data?selected.filter(id=>!selectedStates.data[id]):[];
   useServerPage(articles.isSuccess?total:undefined,pageSize,page,setPage);
   async function read(id: number) {
@@ -190,8 +193,14 @@ export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz
     setReader({ title: detail.title || "文章阅读", markdown: detail.content_md });
   }
   return <Page title="文章库" description="下载后即可阅读，并同时导出 Markdown 和 HTML。单篇与勾选下载进入统一队列，整号下载请在公众号列表操作。">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Label htmlFor="article-source">公众号</Label><select id="article-source" className={selectClass} value={biz} onChange={e => { onBizChange(e.target.value); setPage(0); setSelected([]); }}><option value="">全部公众号</option>{accounts.data?.items.map(s => <option key={s.biz} value={s.biz}>{s.nickname || s.biz}</option>)}</select></div><span className="text-sm text-muted-foreground">共 {total} 篇</span></div>
-    {selected.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3"><span className="text-sm">已选择 {selected.length} 篇</span>{selectionReady ? <Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showExportResult(await exportArticles(selected)))}>导出</Button> : missingSelected.length > 0 ? <Button size="sm" variant="outline" disabled={busy || selectedStates.isFetching} onClick={() => run(async () => showDownloadReceipt(await downloadArticles(missingSelected)))}>下载未完成文章</Button> : <span role="status" className="text-xs text-muted-foreground">{selectedStates.error ? "正文状态读取失败，请重试" : "正在检查正文状态…"}</span>}<Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting([...selected])}>删除</Button><Button size="sm" variant="ghost" onClick={() => setSelected([])}>取消选择</Button></div>}
+    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Label htmlFor="article-source">公众号</Label><select id="article-source" disabled={busy} className={selectClass} value={biz} onChange={e => { onBizChange(e.target.value); setPage(0); setSelected([]); }}><option value="">全部公众号</option>{accounts.data?.items.map(s => <option key={s.biz} value={s.biz}>{s.nickname || s.biz}</option>)}</select></div><span className="text-sm text-muted-foreground">共 {total} 篇</span></div>
+    <div className="flex flex-wrap items-center gap-3">
+      <Label htmlFor="article-title">标题</Label><Input id="article-title" className="w-64" placeholder="输入标题关键词" value={title} disabled={busy} onChange={e => {setTitle(e.target.value);setPage(0);setSelected([]);}} />
+      <Label htmlFor="article-download-status">下载状态</Label><select id="article-download-status" className={selectClass} value={downloadStatus} disabled={busy} onChange={e => {setDownloadStatus(e.target.value);setPage(0);setSelected([]);}}><option value="">全部状态</option><option value="downloaded">已下载正文</option><option value="missing">未下载正文（含下载失败）</option></select>
+      <Button size="sm" variant="outline" disabled={busy || articles.isFetching || !total} onClick={() => run(async () => {const ids = await articleSelectionIds(biz || undefined, title, downloaded);setSelected(ids);})}>选择全部筛选结果（{total} 篇）</Button>
+      <span className="text-xs text-muted-foreground">跨页保留选择；修改筛选条件后清空选择。</span>
+    </div>
+    {selected.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3"><span className="text-sm">已选择 {selected.length} 篇</span>{selectionReady ? <Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showExportResult(await exportArticles(selected)))}>导出已下载文章</Button> : null}{missingSelected.length > 0 ? <Button size="sm" variant="outline" disabled={busy || selectedStates.isFetching} onClick={() => run(async () => showDownloadReceipt(await downloadArticles(missingSelected)))}>下载未完成文章</Button> : !selectionReady ? <span role="status" className="text-xs text-muted-foreground">{selectedStates.error ? "正文状态读取失败，请重试" : "正在检查正文状态…"}</span> : null}<Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting([...selected])}>删除</Button><Button size="sm" variant="ghost" onClick={() => setSelected([])}>取消选择</Button></div>}
     {articles.error && <p role="alert" className="text-sm text-destructive">文章读取失败：{String(articles.error)}</p>}
     <Card><CardContent className="pt-4"><Table><TableHeader><TableRow><TableHead><Check name="选择本页全部文章" checked={!!rows.length && rows.every(a => selected.includes(a.id))} onChange={() => setSelected(old => rows.every(a => old.includes(a.id)) ? old.filter(id => !rows.some(a => a.id === id)) : Array.from(new Set([...old, ...rows.map(a => a.id)])))} /></TableHead>{["文章", "发布时间", "操作"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(a => <TableRow key={a.id}>
       <TableCell><Check name={`选择文章${a.title || a.id}`} checked={selected.includes(a.id)} onChange={() => setSelected(old => toggle(old, a.id))} /></TableCell><TableCell className="max-w-xl"><p className="font-medium">{a.title || "无标题"}</p><p className="mt-1 text-xs text-muted-foreground">{a.account || a.author || ""}</p></TableCell><TableCell className="whitespace-nowrap text-xs">{dt(a.published_at)}</TableCell><TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1">

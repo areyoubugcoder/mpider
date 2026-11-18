@@ -418,6 +418,85 @@ mod tests {
         );
     }
     #[test]
+    fn article_filters_and_selection_cover_all_pages() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_account("FILTER", None, None).unwrap();
+        s.upsert_account("OTHER", None, None).unwrap();
+        for n in 0..25 {
+            s.upsert_article(
+                if n == 24 { "OTHER" } else { "FILTER" },
+                &n.to_string(),
+                1,
+                &crate::ArticleFields {
+                    title: Some(if n == 0 {
+                        "特殊%_标题".into()
+                    } else {
+                        format!("Rust文章{n}")
+                    }),
+                    content_md: Some(if n % 2 == 0 { "正文" } else { " \n\t" }.into()),
+                    detail_done: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let ids = s
+            .article_selection_ids(Some("FILTER"), Some("rust"), None)
+            .unwrap();
+        assert_eq!(ids.len(), 23);
+        let first = s
+            .list_articles_filtered(Some("FILTER"), 10, 0, false, Some("rust"), None)
+            .unwrap();
+        let second = s
+            .list_articles_filtered(Some("FILTER"), 10, 10, false, Some("rust"), None)
+            .unwrap();
+        assert_eq!(first.iter().map(|r| r.id).collect::<Vec<_>>(), ids[..10]);
+        assert_eq!(second.iter().map(|r| r.id).collect::<Vec<_>>(), ids[10..20]);
+        for downloaded in [true, false] {
+            let rows = s
+                .list_articles_filtered(
+                    Some("FILTER"),
+                    100,
+                    0,
+                    false,
+                    Some("文章"),
+                    Some(downloaded),
+                )
+                .unwrap();
+            assert!(rows.iter().all(|r| r.has_body == downloaded));
+            assert_eq!(
+                rows.len() as i64,
+                s.count_articles_filtered(Some("FILTER"), Some("文章"), Some(downloaded))
+                    .unwrap()
+            );
+            assert_eq!(
+                rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+                s.article_selection_ids(Some("FILTER"), Some("文章"), Some(downloaded))
+                    .unwrap()
+            );
+        }
+        assert_eq!(
+            s.article_selection_ids(None, Some("%_"), None)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(s
+            .article_selection_ids(None, Some("不存在"), None)
+            .unwrap()
+            .is_empty());
+        s.conn()
+            .execute("UPDATE articles SET is_deleted=1 WHERE id=?", [ids[0]])
+            .unwrap();
+        assert_eq!(
+            s.article_selection_ids(Some("FILTER"), Some("rust"), None)
+                .unwrap()
+                .len(),
+            22
+        );
+    }
+
+    #[test]
     fn active_queues_and_body_flags_use_actual_data_beyond_snapshot_limits() {
         let s = Store::open_in_memory().unwrap();
         s.upsert_account("ACTIVE", Some("虚构"), None).unwrap();

@@ -2093,15 +2093,24 @@ impl Store {
         offset: i64,
         only_detail: bool,
     ) -> Result<Vec<ArticleRow>> {
+        self.list_articles_filtered(biz, limit, offset, only_detail, None, None)
+    }
+
+    pub fn list_articles_filtered(
+        &self,
+        biz: Option<&str>,
+        limit: i64,
+        offset: i64,
+        only_detail: bool,
+        title: Option<&str>,
+        downloaded: Option<bool>,
+    ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
              published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0 FROM articles WHERE is_deleted=0",
         );
-        let mut args: Vec<SqlValue> = Vec::new();
-        if let Some(b) = biz {
-            sql.push_str(" AND biz=?");
-            args.push(SqlValue::Text(b.to_string()));
-        }
+        let (filter, mut args) = Self::article_filter(biz, title, downloaded);
+        sql.push_str(&filter);
         if only_detail {
             sql.push_str(" AND detail_done=1");
         }
@@ -2186,6 +2195,59 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn article_filter(
+        biz: Option<&str>,
+        title: Option<&str>,
+        downloaded: Option<bool>,
+    ) -> (String, Vec<SqlValue>) {
+        let mut sql = String::new();
+        let mut args = Vec::new();
+        if let Some(biz) = biz {
+            sql.push_str(" AND biz=?");
+            args.push(SqlValue::Text(biz.into()));
+        }
+        if let Some(title) = title.map(str::trim).filter(|s| !s.is_empty()) {
+            sql.push_str(" AND instr(lower(COALESCE(title,'')),lower(?))>0");
+            args.push(SqlValue::Text(title.into()));
+        }
+        if let Some(downloaded) = downloaded {
+            sql.push_str(" AND (length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0)=?");
+            args.push(SqlValue::Integer(i64::from(downloaded)));
+        }
+        (sql, args)
+    }
+
+    pub fn count_articles_filtered(
+        &self,
+        biz: Option<&str>,
+        title: Option<&str>,
+        downloaded: Option<bool>,
+    ) -> Result<i64> {
+        let (filter, args) = Self::article_filter(biz, title, downloaded);
+        Ok(self.conn().query_row(
+            &format!("SELECT COUNT(*) FROM articles WHERE is_deleted=0{filter}"),
+            params_from_iter(args),
+            |r| r.get(0),
+        )?)
+    }
+
+    /// 全选只返回 ID，最多十万篇，与批量操作限制保持一致。
+    pub fn article_selection_ids(
+        &self,
+        biz: Option<&str>,
+        title: Option<&str>,
+        downloaded: Option<bool>,
+    ) -> Result<Vec<i64>> {
+        let (filter, args) = Self::article_filter(biz, title, downloaded);
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!("SELECT id FROM articles WHERE is_deleted=0{filter} ORDER BY (published_at IS NULL), published_at DESC, id DESC LIMIT 100001"))?;
+        let ids = stmt
+            .query_map(params_from_iter(args), |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?;
+        anyhow::ensure!(ids.len() <= 100000, "筛选结果超过十万篇，请缩小筛选范围");
+        Ok(ids)
     }
 
     /// 文章总数（翻页用；biz 过滤可选，不含已删除）。
