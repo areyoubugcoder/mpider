@@ -1013,19 +1013,23 @@ fn list_articles(
     biz: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+    title: Option<String>,
+    downloaded: Option<bool>,
 ) -> Result<ArticlePage, String> {
     let rows = state
         .store
-        .list_articles(
+        .list_articles_filtered(
             biz.as_deref(),
             limit.unwrap_or(200).clamp(1, 1000),
             offset.unwrap_or(0),
             false,
+            title.as_deref(),
+            downloaded,
         )
         .map_err(|e| e.to_string())?;
     let total = state
         .store
-        .count_articles(biz.as_deref())
+        .count_articles_filtered(biz.as_deref(), title.as_deref(), downloaded)
         .map_err(|e| e.to_string())?;
     let nick: std::collections::HashMap<String, Option<String>> = state
         .store
@@ -1050,6 +1054,19 @@ fn list_articles(
         })
         .collect();
     Ok(ArticlePage { items, total })
+}
+
+#[tauri::command]
+fn article_selection_ids(
+    state: State<'_, AppState>,
+    biz: Option<String>,
+    title: Option<String>,
+    downloaded: Option<bool>,
+) -> Result<Vec<i64>, String> {
+    state
+        .store
+        .article_selection_ids(biz.as_deref(), title.as_deref(), downloaded)
+        .map_err(|e| e.to_string())
 }
 
 /// 单篇文章详情（Markdown 阅读用）。
@@ -2660,6 +2677,7 @@ pub fn run() {
             seed_server_apply,
             seed_server_status,
             list_articles,
+            article_selection_ids,
             get_article_detail,
             article_counts,
             run_detail,

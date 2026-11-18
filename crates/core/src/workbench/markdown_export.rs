@@ -91,7 +91,7 @@ pub(super) fn escaped(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// 打开目录选择前验证全部正文，避免用户选完路径才发现无法导出。
+/// 打开目录选择前确认存在可导出的正文，避免用户选完路径才发现无法导出。
 pub fn validate_selection(store: &Store, biz: Option<&str>, ids: &[i64]) -> Result<()> {
     let ids = match biz {
         Some(biz) => store
@@ -107,8 +107,8 @@ pub fn validate_selection(store: &Store, biz: Option<&str>, ids: &[i64]) -> Resu
     );
     let states = store.wb_article_body_states(&ids)?;
     ensure!(
-        ids.iter().all(|id| states.get(id) == Some(&true)),
-        "所选文章有未下载的正文，请先下载后导出"
+        ids.iter().any(|id| states.get(id) == Some(&true)),
+        "所选文章均无正文，请先下载后导出"
     );
     Ok(())
 }
@@ -320,9 +320,14 @@ fn export_rows(
                     .get_article_md(row.id)?
                     .and_then(|(a, m)| if a.is_deleted == 0 { m } else { None });
         }
-        let markdown = markdown
-            .filter(|m| !m.trim().is_empty())
-            .context("文章正文已缺失，请重新下载后导出")?;
+        let Some(markdown) = markdown.filter(|m| !m.trim().is_empty()) else {
+            result.missing_body += 1;
+            on_progress(ExportProgress {
+                completed: seq + 1,
+                total: result.total,
+            });
+            continue;
+        };
         for cap in md_image.captures_iter(&markdown) {
             ensure!(
                 images.contains_key(&cap[1]),
@@ -428,7 +433,7 @@ fn export_rows(
         manifest.push_str("\r\n");
         result.with_body += 1;
         on_progress(ExportProgress {
-            completed: result.with_body,
+            completed: result.with_body + result.missing_body,
             total: result.total,
         });
     }
@@ -439,14 +444,15 @@ fn export_rows(
         .map(|(a, b)| format!("{a} ~ {b}"))
         .unwrap_or_default();
     let summary = format!(
-        "共 {} 篇{} · 成功 {}",
+        "共 {} 篇{} · 成功 {} · 跳过缺正文 {}",
         result.total,
         if range.is_empty() {
             String::new()
         } else {
             format!(" · {range}")
         },
-        result.with_body
+        result.with_body,
+        result.missing_body
     );
     let disclaimer =
         "文章仅供个人学习、研究和收藏使用，版权归原作者及公众号所有。请勿用于商业用途或公开传播。";
@@ -468,7 +474,11 @@ fn export_rows(
     let readme = format!("\u{feff}{nickname} · 公众号文章\r\n共 {} 篇，{range}\r\n\r\n【目录说明】\r\n  index.html      双击用浏览器打开，按发布时间倒序浏览，可搜索标题。\r\n  articles/       每篇文章一个 .html 和一个 .md，文件名格式：序号_标题。\r\n  images/         共享的本地图片，请与 articles/ 保持相对位置。\r\n  manifest.csv    文章清单：sn、标题、发布时间、原文链接、类型、正文状态。\r\n\r\n视频、音乐等保留原文观看或收听提示。未保存的图片显示提示，不自动联网加载。\r\n本次 {} 篇文章存在缺图；可在软件中补齐图片后重新导出。\r\n\r\n【如何另存为 PDF】\r\n用浏览器打开文章，按 Ctrl+P（Mac 为 Command+P），选择另存为 PDF；建议勾选背景图形。\r\n\r\n【版权说明】\r\n{disclaimer}\r\n", result.total, result.partial_images);
     super::archive::atomic_write(&stage.join("README.txt"), readme.as_bytes())?;
     // 复制期间用户可能删除文章；发布前重新核对整个固定集合。
-    validate_selection(store, None, &export_ids)?;
+    ensure!(result.with_body > 0, "没有可导出的正文，请先下载");
+    for id in export_ids {
+        let (article, _) = store.get_article_md(id)?.context("文章已删除或不存在")?;
+        ensure!(article.is_deleted == 0, "文章已删除或不存在");
+    }
     ensure!(!published.exists(), "导出目录已存在，请重试");
     std::fs::rename(&stage, &published)?;
     drop(cleanup);
@@ -493,7 +503,26 @@ mod tests {
     }
 
     #[test]
-    fn export_requires_all_bodies_and_uses_reference_layout_with_shared_images() {
+    fn export_rejects_selection_without_any_body() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_account("FAKE", Some("测试"), None).unwrap();
+        let id = store
+            .upsert_article(
+                "FAKE",
+                "1",
+                1,
+                &ArticleFields {
+                    content_md: Some("   ".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(validate_selection(&store, None, &[id]).is_err());
+        assert!(validate_selection(&store, Some("FAKE"), &[]).is_err());
+    }
+
+    #[test]
+    fn export_skips_missing_bodies_and_uses_reference_layout_with_shared_images() {
         let store = Store::open_in_memory().unwrap();
         store
             .upsert_account("FAKE", Some("虚构公众号"), None)
@@ -511,7 +540,12 @@ mod tests {
                 ..Default::default()
             }).unwrap();
         }
-        assert!(export_source(&store, &root.join("workbench"), "FAKE", &output).is_err());
+        let partial = export_source(&store, &root.join("workbench"), "FAKE", &output).unwrap();
+        assert_eq!(
+            (partial.total, partial.with_body, partial.missing_body),
+            (76, 75, 1)
+        );
+        std::fs::remove_dir_all(partial.directory).unwrap();
         assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
         let id = store.upsert_article("FAKE", "0", 1, &ArticleFields {
             content_md: Some("本地正文\n\n![图](images/abc.png)".into()),
