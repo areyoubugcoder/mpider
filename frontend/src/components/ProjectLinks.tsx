@@ -1,15 +1,11 @@
 /** 单行底栏左侧广告位：独立向上轮播，长文省略，悬停或聚焦浮层展示全文。 */
 import { useEffect, useId, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import bundledConfig from "../../../config/advertisements.json";
 import { ExternalLink } from "@/components/ExternalLink";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { ADVERTISEMENTS_REFRESH_MS, loadAdvertisementConfig, readAdvertisementCache, type AdvertisementConfig } from "@/lib/advertisements";
+import type { AdvertisementConfig } from "@/lib/advertisements";
+import { useAdvertisements } from "@/lib/use-advertisements";
 
 const TRANSITION_MS = 650;
-function localStorageIfAvailable() {
-  try { return window.localStorage; } catch { return undefined; }
-}
 
 function AdvertisementSlot({ config }: { config: AdvertisementConfig }) {
   const promotions = config.items.filter(item => item.enabled);
@@ -79,18 +75,7 @@ function AdvertisementSlot({ config }: { config: AdvertisementConfig }) {
 }
 
 export function ProjectLinks() {
-  const config = useQuery({
-    queryKey: ["advertisements"],
-    queryFn: () => loadAdvertisementConfig({ fallback: bundledConfig as AdvertisementConfig, storage: localStorageIfAvailable(),
-      url: import.meta.env.DEV ? import.meta.env.VITE_ADVERTISEMENTS_URL : undefined }),
-    initialData: () => readAdvertisementCache(localStorageIfAvailable()) || bundledConfig as AdvertisementConfig,
-    initialDataUpdatedAt: 0,
-    staleTime: ADVERTISEMENTS_REFRESH_MS,
-    refetchInterval: ADVERTISEMENTS_REFRESH_MS,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: false,
-    retry: false,
-  }).data;
+  const config = useAdvertisements();
   if (!config.enabled || !config.items.some(item => item.enabled)) return null;
   return <nav aria-label="产品广告" className="w-[clamp(11rem,26vw,23rem)] min-w-0 shrink-0 text-xs">
     <AdvertisementSlot key={JSON.stringify(config)} config={config} />

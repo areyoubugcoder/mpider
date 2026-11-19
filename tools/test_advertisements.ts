@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { ADVERTISEMENTS_CACHE_KEY, loadAdvertisementConfig, parseAdvertisementConfig, readAdvertisementCache, type AdvertisementConfig } from "../frontend/src/lib/advertisements.ts";
+import { ADVERTISEMENT_COOLDOWN_MS, ADVERTISEMENT_DISMISSAL_KEY, advertisementCooldownRemaining, readAdvertisementDismissal, saveAdvertisementDismissal } from "../frontend/src/lib/advertisement-dismissal.ts";
 
 const fallback = parseAdvertisementConfig(JSON.parse(await readFile(new URL("../config/advertisements.json", import.meta.url), "utf8")))!;
 const remote: AdvertisementConfig = { ...fallback, interval_seconds: 9, items: [{ ...fallback.items[0], id: "remote", title: "远程推荐" }] };
@@ -12,6 +13,33 @@ function memoryStorage() {
   const values = new Map<string, string>();
   return { getItem: (key: string) => values.get(key) || null, setItem: (key: string, value: string) => { values.set(key, value); } };
 }
+
+test("滑入广告关闭后完整冷却一小时，重启和配置刷新不重置关闭时间", () => {
+  const storage = memoryStorage();
+  const now = 1800000000000;
+  assert.equal(advertisementCooldownRemaining(readAdvertisementDismissal(storage), now), 0);
+  const dismissedAt = saveAdvertisementDismissal(storage, now);
+  assert.equal(advertisementCooldownRemaining(dismissedAt, now), ADVERTISEMENT_COOLDOWN_MS);
+  storage.setItem(ADVERTISEMENTS_CACHE_KEY, JSON.stringify({ saved_at: now + 1000, config: remote }));
+  const afterRestart = readAdvertisementDismissal(storage);
+  assert.equal(advertisementCooldownRemaining(afterRestart, now + 30 * 60 * 1000), 30 * 60 * 1000);
+  assert.equal(advertisementCooldownRemaining(afterRestart, now + ADVERTISEMENT_COOLDOWN_MS - 1), 1);
+  assert.equal(advertisementCooldownRemaining(afterRestart, now + ADVERTISEMENT_COOLDOWN_MS), 0);
+  assert.equal(advertisementCooldownRemaining(afterRestart, now + ADVERTISEMENT_COOLDOWN_MS + 1), 0);
+  assert.equal(advertisementCooldownRemaining(afterRestart, now - 1000), ADVERTISEMENT_COOLDOWN_MS);
+});
+
+test("关闭时间损坏时正常展示，存储不可用时仍保留本次运行的冷却", () => {
+  const storage = memoryStorage();
+  for (const value of ["{", "NaN", "Infinity", "0", "-1", "1.5", " "]) {
+    storage.setItem(ADVERTISEMENT_DISMISSAL_KEY, value);
+    assert.equal(readAdvertisementDismissal(storage), null);
+  }
+  const broken = { getItem: () => { throw new Error("unavailable"); }, setItem: () => { throw new Error("quota"); } };
+  assert.equal(readAdvertisementDismissal(broken), null);
+  const now = 1800000000000;
+  assert.equal(advertisementCooldownRemaining(saveAdvertisementDismissal(broken, now), now + 1), ADVERTISEMENT_COOLDOWN_MS - 1);
+});
 
 test("内置配置符合契约；支持关闭整个广告位、单条停投和空广告列表", () => {
   assert.equal(fallback.items.length, 2);

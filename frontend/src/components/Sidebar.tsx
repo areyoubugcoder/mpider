@@ -15,8 +15,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { View } from "@/views/types";
 import appIcon from "@/assets/app-icon.png";
-import { ExternalLink } from "@/components/ExternalLink";
-import { PROJECT_LINKS } from "@/lib/project-links";
+import feedbackQr from "@/assets/feedback-group-qr.png";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface NavItem {
   key: View;
@@ -98,9 +98,20 @@ export function Sidebar({
         ))}
       </nav>
       <div className="mx-3 mb-3 flex flex-col gap-0.5">
-        <ExternalLink href={PROJECT_LINKS.issues} title="在 GitHub 创建 Issue（不会自动上传日志）" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 hover:no-underline focus-visible:ring-sidebar-ring">
-          <MessageSquarePlus className="size-4 shrink-0 opacity-80" aria-hidden="true" /><span>反馈问题</span>
-        </ExternalLink>
+        <Dialog>
+          <DialogTrigger asChild>
+            <button type="button" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+              <MessageSquarePlus className="size-4 shrink-0 opacity-80" aria-hidden="true" /><span>反馈问题</span>
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[calc(100vh-2rem)] max-w-sm overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>加入反馈交流群</DialogTitle>
+              <DialogDescription>使用 QQ 扫描下方二维码，入群反馈问题或交流使用经验。</DialogDescription>
+            </DialogHeader>
+            <img src={feedbackQr} alt="MPider 反馈交流群入群二维码" className="mx-auto w-full max-w-72 rounded-xl" />
+          </DialogContent>
+        </Dialog>
         <button type="button" onClick={onAbout} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
           <Info className="size-4 shrink-0 opacity-80" /><span>关于</span>
         </button>
