@@ -101,15 +101,15 @@ export function Sidebar({
         <Dialog>
           <DialogTrigger asChild>
             <button type="button" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-              <MessageSquarePlus className="size-4 shrink-0 opacity-80" aria-hidden="true" /><span>反馈问题</span>
+              <MessageSquarePlus className="size-4 shrink-0 opacity-80" aria-hidden="true" /><span>加入交流群</span>
             </button>
           </DialogTrigger>
           <DialogContent className="max-h-[calc(100vh-2rem)] max-w-sm overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>加入反馈交流群</DialogTitle>
-              <DialogDescription>使用 QQ 扫描下方二维码，入群反馈问题或交流使用经验。</DialogDescription>
+              <DialogTitle>加入 MPider 交流群</DialogTitle>
+              <DialogDescription>扫码加入 QQ 群，交流使用心得、提出建议，一起把 MPider 做得更好。</DialogDescription>
             </DialogHeader>
-            <img src={feedbackQr} alt="MPider 反馈交流群入群二维码" className="mx-auto w-full max-w-72 rounded-xl" />
+            <img src={feedbackQr} alt="MPider 交流群入群二维码" className="mx-auto w-full max-w-72 rounded-xl" />
           </DialogContent>
         </Dialog>
         <button type="button" onClick={onAbout} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
