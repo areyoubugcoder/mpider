@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { DownloadQueueBar } from "@/components/DownloadQueueBar";
 import { ExportQueueBar } from "@/components/ExportQueueBar";
 import { ProjectLinks } from "@/components/ProjectLinks";
+import { AdvertisementCard } from "@/components/AdvertisementCard";
 import { UpdateProvider, UpdateIndicator } from "@/components/AppUpdater";
 import { AboutDialog } from "@/components/AboutDialog";
 import { version as bundledVersion } from "../../package.json";
@@ -39,6 +40,7 @@ export function App() {
   const push = useQuery({ queryKey: ["push-monitor"], queryFn: pushStatus, refetchInterval: 2000 });
   return <UpdateProvider><div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
     <div className="flex min-h-0 flex-1"><Sidebar onAbout={() => setAboutOpen(true)} showLaboratory={showLaboratory} view={view} onNav={next => { if (next === "logs") setLogExperiment(null); if (next === "articles") setArticleSource(""); setView(next); }} />
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
         {snapshot.error && <p role="alert" className="mb-4 rounded-lg border border-destructive p-3 text-sm">无法读取持久化工作台：{String(snapshot.error)}。请检查数据库和后台日志。</p>}
         {!!snapshot.data && snapshot.data.policy.cooldown_until > Date.now() / 1000 && <p role="status" className="mb-4 rounded-lg border p-3 text-sm text-warning">全局冷却至 {new Date(snapshot.data.policy.cooldown_until * 1000).toLocaleString()}，列表、文章下载和图片请求等待；推送解析遵从文章间隔及预算。</p>}
@@ -53,6 +55,8 @@ export function App() {
         {view === "logs" && <SystemLogs initialExperimentId={logExperiment} />}
         {view === "faq" && <Faq onNav={setView} />}
       </main>
+      <AdvertisementCard />
+      </div>
     </div>
     <footer className="flex h-10 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
       <ProjectLinks />
