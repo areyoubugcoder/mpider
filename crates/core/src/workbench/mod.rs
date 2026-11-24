@@ -358,6 +358,8 @@ pub struct QueueProgress {
 pub struct ActiveQueues {
     pub download: QueueProgress,
     pub history: QueueProgress,
+    pub interactions: QueueProgress,
+    pub comments: QueueProgress,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

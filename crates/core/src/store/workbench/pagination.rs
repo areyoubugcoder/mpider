@@ -108,8 +108,10 @@ impl Store {
         for (kind, target) in [
             ("archive", &mut queues.download),
             ("history", &mut queues.history),
+            ("interactions", &mut queues.interactions),
+            ("comments", &mut queues.comments),
         ] {
-            let sql = "WITH jobs AS (SELECT CASE WHEN ?1='archive' THEN json_array_length(document,'$.target.article_ids') WHEN json_extract(document,'$.target.pages') IS NULL THEN json_extract(document,'$.target.count') END n,COALESCE(json_extract(document,'$.progress.completed'),0) c FROM wb_tasks WHERE json_extract(document,'$.kind')=?1 AND json_extract(document,'$.state') IN ('queued','running','paused','needs_action') AND (?1<>'archive' OR json_extract(document,'$.target.download_only')=1)) SELECT COUNT(*),COALESCE(SUM(CASE WHEN n IS NULL THEN c ELSE MIN(c,n) END),0),CASE WHEN COUNT(*)=COUNT(n) THEN COALESCE(SUM(n),0) END FROM jobs";
+            let sql = "WITH jobs AS (SELECT CASE WHEN ?1 IN ('archive','interactions','comments') THEN json_array_length(document,'$.target.article_ids') WHEN json_extract(document,'$.target.pages') IS NULL THEN json_extract(document,'$.target.count') END n,COALESCE(json_extract(document,'$.progress.completed'),0) c FROM wb_tasks WHERE json_extract(document,'$.kind')=?1 AND json_extract(document,'$.state') IN ('queued','running','paused','needs_action') AND (?1<>'archive' OR json_extract(document,'$.target.download_only')=1)) SELECT COUNT(*),COALESCE(SUM(CASE WHEN n IS NULL THEN c ELSE MIN(c,n) END),0),CASE WHEN COUNT(*)=COUNT(n) THEN COALESCE(SUM(n),0) END FROM jobs";
             *target = tx.query_row(sql, [kind], |r| {
                 Ok(QueueProgress {
                     task_count: r.get(0)?,
@@ -581,6 +583,83 @@ mod tests {
             store.get_article_md(ids[1]).unwrap().unwrap().0.is_deleted,
             1
         );
+    }
+
+    #[test]
+    fn collection_active_queues_keep_progress_beyond_snapshot_and_remove_terminal_tasks() {
+        let s = Store::open_in_memory().unwrap();
+        {
+            let mut conn = s.conn();
+            let tx = conn.transaction().unwrap();
+            for (kind, state, total, completed) in [
+                ("interactions", "running", 3, 1),
+                ("comments", "paused", 2, 3),
+                ("interactions", "queued", 2, 1),
+                ("comments", "needs_action", 4, 1),
+                ("interactions", "done", 10, 10),
+                ("comments", "cancelled", 10, 2),
+            ] {
+                let id = create_task(
+                    &tx,
+                    kind,
+                    None,
+                    json!({"article_ids":(1..=total).collect::<Vec<_>>()}),
+                )
+                .unwrap();
+                tx.execute("UPDATE wb_tasks SET document=json_set(document,'$.state',?,'$.progress.completed',?) WHERE id=?",params![state,completed,id]).unwrap();
+            }
+            // Old active tasks remain visible even after many subsequent completed jobs.
+            for _ in 0..1001 {
+                let id = create_task(&tx, "comments", None, json!({"article_ids":[1]})).unwrap();
+                tx.execute(
+                    "UPDATE wb_tasks SET document=json_set(document,'$.state','done') WHERE id=?",
+                    [id],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        assert!(!s.wb_tasks().unwrap().iter().any(|t| t.id <= 4));
+        let q = s.wb_active_queues().unwrap();
+        assert_eq!(
+            (
+                q.interactions.task_count,
+                q.interactions.completed,
+                q.interactions.total
+            ),
+            (2, 2, Some(5))
+        );
+        assert_eq!(
+            (
+                q.comments.task_count,
+                q.comments.completed,
+                q.comments.total
+            ),
+            (2, 3, Some(6))
+        );
+        s.wb_task_state(1, "cancelled", None).unwrap();
+        s.wb_task_state(2, "done", None).unwrap();
+        let q = s.wb_active_queues().unwrap();
+        assert_eq!(
+            (
+                q.interactions.task_count,
+                q.interactions.completed,
+                q.interactions.total
+            ),
+            (1, 1, Some(2))
+        );
+        assert_eq!(
+            (
+                q.comments.task_count,
+                q.comments.completed,
+                q.comments.total
+            ),
+            (1, 1, Some(4))
+        );
+        s.wb_task_state(3, "cancelled", None).unwrap();
+        s.wb_task_state(4, "cancelled", None).unwrap();
+        let q = s.wb_active_queues().unwrap();
+        assert_eq!((q.interactions.task_count, q.comments.task_count), (0, 0));
     }
 
     #[test]

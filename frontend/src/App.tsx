@@ -1,11 +1,13 @@
 /** Windows 工作台外壳：工作台与系统日志入口，启动只读状态，不执行旧代理、证书或 RPA 探测。 */
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { BarChart3, History, MessageCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { QueueProgressTrigger } from "@/components/QueueProgressTrigger";
 import { laboratoryVisible, saveLaboratoryVisible } from "@/lib/ui-settings";
 import { toast } from "sonner";
 import { DownloadQueueBar } from "@/components/DownloadQueueBar";
 import { ExportQueueBar } from "@/components/ExportQueueBar";
+import { articleExportProgress } from "@/lib/export-progress";
 import { ProjectLinks } from "@/components/ProjectLinks";
 import { AdvertisementCard } from "@/components/AdvertisementCard";
 import { UpdateProvider, UpdateIndicator } from "@/components/AppUpdater";
@@ -54,6 +56,9 @@ export function App() {
   }
   const health = useQuery({ queryKey: ["health"], queryFn: coreHealth });
   const snapshot = useQuery({ queryKey: ["workbench"], queryFn: workbenchSnapshot, refetchInterval: 2000 });
+  const exportQueue = useSyncExternalStore(articleExportProgress.subscribe, articleExportProgress.getSnapshot);
+  const activeQueueCount = Object.values(snapshot.data?.active_queues ?? {}).filter(queue => queue.task_count > 0).length + (exportQueue ? 1 : 0);
+  const compactQueues = activeQueueCount >= 3;
   const push = useQuery({ queryKey: ["push-monitor"], queryFn: pushStatus, refetchInterval: 2000 });
   return <UpdateProvider><div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
     <div className="flex min-h-0 flex-1"><Sidebar onAbout={() => setAboutOpen(true)} showLaboratory={showLaboratory} view={view} onNav={next => { if (next === "logs") setLogExperiment(null); if (next === "articles") setArticleSource(""); setView(next); }} />
@@ -76,11 +81,16 @@ export function App() {
       <AdvertisementCard />
       </div>
     </div>
-    <footer className="flex h-10 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
+    <footer className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-1.5 text-xs text-muted-foreground">
       <ProjectLinks />
-      <div className="ml-auto flex min-w-0 items-center gap-2"><UpdateIndicator onOpen={() => setView("settings")} /><DownloadQueueBar snapshot={snapshot.data} onTasks={() => { setTaskKind("archive");setView("jobs"); }} />
-      <ExportQueueBar />
-      {!!snapshot.data?.active_queues?.history.task_count && <QueueProgressTrigger queue={snapshot.data.active_queues.history} label="历史采集" hint="点击查看历史采集任务" onClick={()=>{setTaskKind("history");setView("jobs");}} />}</div>
+      <div aria-label="任务进度" className={`ml-auto flex min-w-0 flex-wrap items-center justify-end gap-y-1 ${compactQueues ? "gap-x-1" : "gap-x-2"}`}><UpdateIndicator onOpen={() => setView("settings")} /><DownloadQueueBar snapshot={snapshot.data} compact={compactQueues} onTasks={() => { setTaskKind("archive");setView("jobs"); }} />
+      <ExportQueueBar compact={compactQueues} />
+      {(["history","interactions","comments"] as const).map(kind=>{
+        const queue=snapshot.data?.active_queues?.[kind];
+        const label={history:"历史采集",interactions:"互动数据",comments:"文章评论"}[kind];
+        const icon={history:History,interactions:BarChart3,comments:MessageCircle}[kind];
+        return queue?.task_count ? <QueueProgressTrigger key={kind} queue={queue} label={label} icon={icon} compact={compactQueues} hint={`点击查看${label}任务`} onClick={()=>{setTaskKind(kind);setView("jobs");}} /> : null;
+      })}</div>
       <HomeSyncStatus snapshot={snapshot.data} />
       <button type="button" className="min-w-0 max-w-64 truncate hover:text-foreground" onClick={() => setView("push-monitor")} title={`查看推送监测 · 扫描：${pushPhase(push.data?.run)} · 处理：${pushQueuePhase(push.data?.run.queue, push.data?.pending)}`}>扫描：{pushPhase(push.data?.run)} · 处理：{pushQueuePhase(push.data?.run.queue, push.data?.pending)}</button>
     </footer><Dialog open={!!collection} onOpenChange={open=>{if(!open&&!collecting)setCollection(null);}}><DialogContent><DialogHeader><DialogTitle>创建{collection?.kind==="comments"?"文章评论":"互动数据"}任务</DialogTitle><DialogDescription>{collection && "biz" in collection.target ? `采集「${snapshot.data?.sources.find(s=>s.biz===(collection.target as {biz:string}).biz)?.nickname || "所选公众号"}」的未删除文章。` : `采集所选 ${collection && "ids" in collection.target ? collection.target.ids.length : 0} 篇文章。`}</DialogDescription></DialogHeader><label className="space-y-2 text-sm"><span className="block">已有数据处理</span><select className="h-9 w-full rounded-md border bg-background px-3" value={String(refresh)} onChange={e=>setRefresh(e.target.value==="true")}><option value="false">仅补采未获取（跳过已完成）</option><option value="true">刷新已有数据，同时补采缺失</option></select></label><p className="text-xs text-muted-foreground">任务创建后可在任务页暂停、继续或取消。评论刷新会比对已有留言，只保存变化并补齐缺失回复。</p><div className="flex justify-end gap-2"><Button variant="outline" disabled={collecting} onClick={()=>setCollection(null)}>取消</Button><Button disabled={collecting} onClick={()=>void createCollection()}>{collecting?"正在创建…":"创建任务"}</Button></div></DialogContent></Dialog><AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} version={health.data?.app_version || bundledVersion} /><Toaster />

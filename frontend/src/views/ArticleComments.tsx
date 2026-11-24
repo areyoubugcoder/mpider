@@ -77,25 +77,32 @@ export function ArticleComments({
   const reported = newest?.comment_count ?? article.count;
   const comments = query.data?.pages.flatMap(page => page.items) ?? [];
   const [fetchingRemote, setFetchingRemote] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const canFetchRemote = newest?.can_fetch_more === true;
   useEffect(()=>{if(task)void query.refetch();},[task?.updated_at]);
-  async function runTask(action:()=>Promise<unknown>) {setFetchingRemote(true);try{await action();await remote.refetch();}catch(error){setRemoteError(String(error));}finally{setFetchingRemote(false);}}
+  async function runTask(action:()=>Promise<unknown>) {setRemoteError(null);setFetchingRemote(true);try{await action();await remote.refetch();}catch(error){setRemoteError(String(error));}finally{setFetchingRemote(false);}}
   async function refreshComments() {
     setFetchingRemote(true);
     setRemoteError(null);
-    setMessage(null);
     try {
       await fetchArticleComments(article.id);
       await remote.refetch({ throwOnError: true });
-      setMessage("评论任务已创建，可暂停或取消。");
     } catch (error) {
       setRemoteError(String(error));
     } finally {
       setFetchingRemote(false);
     }
   }
+
+  const status = finished ? "已更新" : task?.state === "paused" ? "已暂停" : task?.state === "cancelled" ? "已取消" : task && ["needs_action", "failed"].includes(task.state) ? "等待处理" : active ? current ? "获取中" : "已排队" : cached ? "本地留言" : "尚未获取";
+  const progress = current ? [
+    current.pages ? `已获取 ${current.pages} 页留言` : active ? "正在获取第 1 页留言" : "",
+    current.reply_pages ? `回复 ${current.reply_pages} 页` : "",
+    current.added ? `新增 ${current.added} 条` : "",
+    current.updated ? `更新 ${current.updated} 条` : "",
+    current.unchanged ? `未变化 ${current.unchanged} 条` : "",
+  ].filter(Boolean).join(" · ") : "";
+  const error = remoteError || (!finished && task && ["needs_action", "failed"].includes(task.state) ? task.reason : null);
 
   async function loadMore() {
     if (query.hasNextPage) {
@@ -111,18 +118,19 @@ export function ArticleComments({
         <DialogTitle>文章留言{reported != null && ` · 微信显示 ${reported}`}</DialogTitle>
         <DialogDescription className="line-clamp-2">{article.title}</DialogDescription>
       </DialogHeader>
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-2">
-        <Button size="sm" variant="outline" disabled={fetchingRemote || pending} onClick={() => void refreshComments()}>
-          {fetchingRemote ? "正在创建…" : active ? "正在获取评论…" : cached || newest?.can_fetch_more === false ? "刷新评论数据" : "获取评论"}
-        </Button>
-        {task && !finished && canCancelTask(task) && <><TaskPrimaryAction task={task} busy={fetchingRemote} run={runTask} /><Button size="sm" variant="ghost" disabled={fetchingRemote} onClick={()=>void runTask(()=>taskAction(task.id,"cancel"))}>取消任务</Button></>}
-        {task && <div role="status" className="w-full space-y-1 text-xs text-muted-foreground">
-          {current && <><p>{current.pages ? `已获取第 1${current.pages>1?`～${current.pages}`:""} 页留言` : active ? "正在准备或获取第 1 页留言" : "本次尚未获取留言分页"}{current.reply_pages>0?` · 已补采 ${current.reply_pages} 页回复`:""}</p><p>新增 {current.added} 条 · 更新 {current.updated} 条 · 未变化 {current.unchanged} 条</p></>}
-          <p>{finished ? "本篇评论已更新" : task.state==="paused" ? "任务已暂停，已保存的评论保留；点击继续后将比对并补齐。" : task.state==="cancelled" ? "任务已取消，已保存的评论保留。" : active && !current ? "已进入队列，等待前面的文章完成。" : ""}</p>
-          {!finished && task.reason && ["needs_action","failed"].includes(task.state) && <p role="alert" className="text-destructive">{task.reason}</p>}
-        </div>}
-        {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
-        {remoteError && <p role="alert" className="w-full text-sm text-destructive">{remoteError}</p>}
+      <div className="shrink-0 space-y-2 border-b border-border pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-1 font-medium text-foreground">{status}</span>
+            <span>已保存 {cached} 条主留言</span>
+          </div>
+          <div aria-label="评论采集操作" className="ml-auto flex items-center gap-3">
+            {pending && task ? <><TaskPrimaryAction task={task} busy={fetchingRemote} run={runTask} /><Button size="sm" variant="ghost" disabled={fetchingRemote} onClick={()=>void runTask(()=>taskAction(task.id,"cancel"))}>取消</Button></> :
+              <Button size="sm" variant="outline" disabled={fetchingRemote} onClick={()=>void refreshComments()}>{fetchingRemote ? "正在创建…" : cached || newest?.can_fetch_more === false ? "刷新评论" : "获取评论"}</Button>}
+          </div>
+        </div>
+        {progress && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{progress}</p>}
+        {error && <p role="alert" className="rounded-md bg-destructive/5 px-3 py-2 text-sm leading-relaxed text-destructive">{error}</p>}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
         {query.isPending && <p role="status" className="py-8 text-center text-sm text-muted-foreground">正在读取留言…</p>}

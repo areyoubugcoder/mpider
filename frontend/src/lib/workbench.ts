@@ -55,7 +55,7 @@ export interface Discovery {
 }
 export interface QueueProgress { task_count: number; completed: number; total: number | null }
 export interface Snapshot {
-  active_queues: { download: QueueProgress; history: QueueProgress };
+  active_queues: { download: QueueProgress; history: QueueProgress; interactions: QueueProgress; comments: QueueProgress };
   download_queue: { task_count: number; total: number; completed: number; skipped: number; failed: number; cancelled: number; pending: number };
   discovery: Discovery | null;
   sources: Source[]; cursors: CursorRecord[]; tasks: Task[]; experiments: Experiment[];
