@@ -1,5 +1,5 @@
 /** Windows 工作台外壳：工作台与系统日志入口，启动只读状态，不执行旧代理、证书或 RPA 探测。 */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { QueueProgressTrigger } from "@/components/QueueProgressTrigger";
 import { laboratoryVisible, saveLaboratoryVisible } from "@/lib/ui-settings";
@@ -14,8 +14,8 @@ import { version as bundledVersion } from "../../package.json";
 import { HomeSyncStatus, SessionRecoveryPanel } from "@/components/HomeSync";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import { coreHealth } from "@/lib/tauri";
-import { type Task, workbenchSnapshot } from "@/lib/workbench";
+import { articleSelectionIds, coreHealth } from "@/lib/tauri";
+import { collectSavedArticle, type Task, workbenchSnapshot } from "@/lib/workbench";
 import { WorkbenchSources, WorkbenchTasks, WorkbenchArticles, WorkbenchRate, WorkbenchSettings } from "@/views/Workbench";
 import { CursorLab } from "@/views/CursorLab";
 import { SystemLogs } from "@/views/SystemLogs";
@@ -35,6 +35,37 @@ export function App() {
   const [articleSource,setArticleSource]=useState("");
   const [taskKind,setTaskKind]=useState<Task["kind"]>("home");
   const [logExperiment, setLogExperiment] = useState<number | null>(null);
+  const queueLock = useRef(false);
+  const [collecting, setCollecting] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [batchErrors, setBatchErrors] = useState<string[]>([]);
+  async function collectAccount(biz: string) {
+    if (!biz || queueLock.current) return;
+    queueLock.current = true;
+    setCollecting(true);
+    setBatchErrors([]);
+    setProgress("正在读取公众号文章…");
+    try {
+      const ids = await articleSelectionIds(biz);
+      const errors: string[] = [];
+      for (const [index, id] of ids.entries()) {
+        setProgress(`互动/评论采集中：${index + 1}/${ids.length}`);
+        try {
+          await collectSavedArticle(id);
+        } catch (error) {
+          errors.push(`文章 ${id}：${String(error)}`);
+        }
+      }
+      setBatchErrors(errors);
+      setProgress(ids.length ? `互动/评论采集结束：成功 ${ids.length - errors.length}/${ids.length}，失败 ${errors.length}` : "该公众号暂无文章");
+    } catch (error) {
+      setProgress("互动/评论入队失败");
+      setBatchErrors([String(error)]);
+    } finally {
+      queueLock.current = false;
+      setCollecting(false);
+    }
+  }
   const health = useQuery({ queryKey: ["health"], queryFn: coreHealth });
   const snapshot = useQuery({ queryKey: ["workbench"], queryFn: workbenchSnapshot, refetchInterval: 2000 });
   const push = useQuery({ queryKey: ["push-monitor"], queryFn: pushStatus, refetchInterval: 2000 });
@@ -48,7 +79,7 @@ export function App() {
         {view === "accounts" && <WorkbenchSources onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "push-monitor" && <PushMonitor onRate={() => setView("ratelimit")} onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "jobs" && <WorkbenchTasks kind={taskKind} onKindChange={setTaskKind} />}
-        {view === "articles" && <WorkbenchArticles key={articleSource} biz={articleSource} onBizChange={setArticleSource} />}
+        {view === "articles" && <WorkbenchArticles collecting={collecting} onCollect={collectAccount} key={articleSource} biz={articleSource} onBizChange={setArticleSource} />}
         {view === "ratelimit" && <WorkbenchRate />}
         {showLaboratory && view === "lab" && <CursorLab onLogs={id => { setLogExperiment(id); setView("logs"); }} />}
         {view === "settings" && <WorkbenchSettings showLaboratory={showLaboratory} onLaboratoryChange={changeLaboratory} />}
@@ -60,6 +91,7 @@ export function App() {
     </div>
     <footer className="flex h-10 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
       <ProjectLinks />
+      {progress && <span role="status" title={batchErrors.join("\n")}>{progress}</span>}
       <div className="ml-auto flex min-w-0 items-center gap-2"><UpdateIndicator onOpen={() => setView("settings")} /><DownloadQueueBar snapshot={snapshot.data} onTasks={() => { setTaskKind("archive");setView("jobs"); }} />
       <ExportQueueBar />
       {!!snapshot.data?.active_queues?.history.task_count && <QueueProgressTrigger queue={snapshot.data.active_queues.history} label="历史采集" hint="点击查看历史采集任务" onClick={()=>{setTaskKind("history");setView("jobs");}} />}</div>

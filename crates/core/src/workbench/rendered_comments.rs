@@ -141,6 +141,7 @@ fn from_item(root: ElementRef<'_>, reply: bool, depth: u8) -> Option<ArticleComm
         id: id.to_owned(),
         author,
         content,
+        images: vec![],
         likes,
         created_at: None,
         is_author,

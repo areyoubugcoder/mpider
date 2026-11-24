@@ -123,6 +123,7 @@ export interface ArticleComment {
   id: string;
   author: string;
   content: string;
+  images?: string[];
   likes: number | null;
   created_at: number | null;
   is_author: boolean;
@@ -146,3 +147,6 @@ export const fetchArticleComments = (articleId: number) =>
 
 export const importRenderedComments = (articleId: number) =>
   invoke<number>("workbench_import_rendered_comments", { articleId });
+
+export const collectSavedArticle = (articleId: number) =>
+  invoke<void>("workbench_collect_saved_article", { articleId });

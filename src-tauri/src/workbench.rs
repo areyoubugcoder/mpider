@@ -91,7 +91,17 @@ pub async fn workbench_fetch_article_comments(
     state: State<'_, AppState>,
     article_id: i64,
 ) -> Result<(), String> {
-    core::comments::fetch_page(&state.store, article_id)
+    core::comments::collect_saved_article(&state.store, article_id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+pub async fn workbench_collect_saved_article(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<(), String> {
+    core::comments::collect_saved_article(&state.store, article_id)
         .await
         .map_err(|error| format!("{error:#}"))
 }

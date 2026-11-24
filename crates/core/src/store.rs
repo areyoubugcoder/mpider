@@ -2352,7 +2352,7 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE articles SET read_num=COALESCE(?1,read_num), old_like_num=COALESCE(?2,old_like_num),
+            "UPDATE articles SET read_num=CASE WHEN ?6 IS NOT NULL THEN NULL ELSE COALESCE(?1,read_num) END, old_like_num=COALESCE(?2,old_like_num),
              like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count),
              interaction_share_count=COALESCE(?5,interaction_share_count),
              interaction_read_display=CASE WHEN ?1 IS NOT NULL THEN NULL
@@ -2388,8 +2388,20 @@ impl Store {
                 })
                 .unwrap_or_default();
             merge_comments(&mut replies, comment.replies.iter().cloned());
+            let mut images = comment.images.clone();
+            if let Some(prior) = previous
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<ArticleComment>(s).ok())
+            {
+                for image in prior.images {
+                    if !images.contains(&image) {
+                        images.push(image);
+                    }
+                }
+            }
             let thread = ArticleComment {
                 replies,
+                images,
                 ..comment.clone()
             };
             tx.execute(
@@ -2404,6 +2416,14 @@ impl Store {
             )?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn resume_or_refresh_comments(&self, id: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE articles SET comment_next_offset=0 WHERE id=? AND is_deleted=0 AND comment_next_offset<0",
+            [id],
+        )?;
         Ok(())
     }
 
@@ -2467,6 +2487,10 @@ impl Store {
                                 .unwrap_or_else(|| format!("local:{row_id}")),
                             author: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                             content: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            images: saved
+                                .as_ref()
+                                .map(|item| item.images.clone())
+                                .unwrap_or_default(),
                             likes: row.get(4)?,
                             created_at: row.get(6)?,
                             is_author: saved.as_ref().is_some_and(|item| item.is_author),

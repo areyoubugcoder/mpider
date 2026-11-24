@@ -1559,7 +1559,8 @@ impl Store {
             .unwrap_or_default();
         let push = purpose == crate::workbench::push_monitor::PURPOSE;
         ensure!(
-            push == (category == crate::workbench::push_monitor::CATEGORY),
+            (push || purpose == "article_comments")
+                == (category == crate::workbench::push_monitor::CATEGORY),
             "网页解析请求类别与用途不匹配"
         );
         if push {
@@ -1645,6 +1646,8 @@ impl Store {
             owner_id: owner,
             owner_kind: if purpose.starts_with("cursor_") {
                 "experiment"
+            } else if purpose == "article_comments" {
+                "article"
             } else if purpose == crate::workbench::push_monitor::PURPOSE {
                 "push_monitor"
             } else {

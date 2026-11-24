@@ -1,5 +1,7 @@
 //! Windows 采集工作台：独立任务、历史检查点、游标实验和离线归档的公开契约。
 pub mod archive;
+mod article_session;
+mod authenticated_comments;
 pub mod comments;
 pub mod discovery;
 pub mod engine;
