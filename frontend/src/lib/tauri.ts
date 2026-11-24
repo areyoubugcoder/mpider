@@ -163,7 +163,15 @@ export interface SystemStatus {
 }
 
 /** 「公众号文章」列表行（后端 ArticleItem）。 */
+export interface ArticleInteractions {
+  read_count: number | null;
+  like_count: number | null;
+  watching_count: number | null;
+  comment_count: number | null;
+}
+
 export interface ArticleItem {
+  interactions: ArticleInteractions;
   has_body: boolean;
   id: number;
   biz: string;

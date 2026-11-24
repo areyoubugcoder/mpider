@@ -985,6 +985,7 @@ fn seed_server_status() -> mpider_core::seedserver::SeedServerStatus {
 #[derive(Serialize)]
 struct ArticleItem {
     has_body: bool,
+    interactions: mpider_core::workbench::interactions::ArticleInteractions,
     id: i64,
     biz: String,
     /// 所属公众号昵称（accounts 表；没有昵称时为 None，前端显示 biz）。
@@ -1042,6 +1043,7 @@ fn list_articles(
         .into_iter()
         .map(|r| ArticleItem {
             has_body: r.has_body,
+            interactions: r.interactions,
             account: nick.get(&r.biz).cloned().flatten(),
             id: r.id,
             biz: r.biz,
@@ -2628,6 +2630,7 @@ pub fn run() {
             workbench::workbench_push_queue_start,
             workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
+            workbench::workbench_collect_interactions,
             workbench::workbench_source_page,
             workbench::workbench_task_page,
             workbench::workbench_request_page,

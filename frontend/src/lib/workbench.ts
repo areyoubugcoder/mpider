@@ -118,3 +118,9 @@ export const logUiError = (kind: "uncaught_error" | "unhandled_rejection" | "act
 export const exportExperiment = (id: number) => invoke<{ path: string; count: number } | null>("workbench_export_experiment", { id });
 
 export const articleBodyStates = (articleIds: number[]) => invoke<Record<number,boolean>>("workbench_article_body_states", { articleIds });
+
+export async function collectArticleInteractions(articleId: number, onReady: () => void) {
+  const ready = new Channel<null>();
+  ready.onmessage = onReady;
+  return invoke<import("./tauri").ArticleInteractions>("workbench_collect_interactions", { articleId, onReady: ready });
+}

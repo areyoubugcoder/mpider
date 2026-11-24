@@ -2107,7 +2107,7 @@ impl Store {
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0 FROM articles WHERE is_deleted=0",
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count FROM articles WHERE is_deleted=0",
         );
         let (filter, mut args) = Self::article_filter(biz, title, downloaded);
         sql.push_str(&filter);
@@ -2137,6 +2137,7 @@ impl Store {
                 is_deleted: r.get(10)?,
                 detail_error: r.get(11)?,
                 has_body: r.get(12)?,
+                interactions: Self::read_article_interactions(r)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -2152,7 +2153,7 @@ impl Store {
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0 FROM articles \
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count FROM articles \
              WHERE is_deleted=0 AND detail_done=0 AND content_url IS NOT NULL AND content_url != ''",
         );
         let mut args: Vec<SqlValue> = Vec::new();
@@ -2192,6 +2193,7 @@ impl Store {
                 is_deleted: r.get(10)?,
                 detail_error: r.get(11)?,
                 has_body: r.get(12)?,
+                interactions: Self::read_article_interactions(r)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -2274,7 +2276,7 @@ impl Store {
         let row = conn
             .query_row(
                 "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-                 published_at, detail_done, is_deleted, detail_error, content_md FROM articles WHERE id=?",
+                 published_at, detail_done, is_deleted, detail_error, content_md, read_num, old_like_num, like_num, comment_count FROM articles WHERE id=?",
                 params![id],
                 |r| {
                     Ok((
@@ -2291,6 +2293,7 @@ impl Store {
                             detail_done: r.get(9)?,
                             is_deleted: r.get(10)?,
                             detail_error: r.get(11)?,
+                            interactions: Self::read_article_interactions(r)?,
                             has_body: r.get::<_, Option<String>>(12)?.is_some_and(|md| !md.trim().is_empty()),
                         },
                         r.get::<_, Option<String>>(12)?,
@@ -2299,6 +2302,32 @@ impl Store {
             )
             .optional()?;
         Ok(row)
+    }
+
+    fn read_article_interactions(
+        row: &rusqlite::Row<'_>,
+    ) -> rusqlite::Result<crate::workbench::interactions::ArticleInteractions> {
+        Ok(crate::workbench::interactions::ArticleInteractions {
+            read_count: row.get(13)?,
+            like_count: row.get(14)?,
+            watching_count: row.get(15)?,
+            comment_count: row.get(16)?,
+        })
+    }
+
+    pub fn save_article_interactions(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+    ) -> Result<()> {
+        let updated = self.conn().execute(
+            "UPDATE articles SET read_num=COALESCE(?1,read_num), old_like_num=COALESCE(?2,old_like_num),
+             like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count)
+             WHERE id=?5 AND is_deleted=0",
+            params![metrics.read_count, metrics.like_count, metrics.watching_count, metrics.comment_count, id],
+        )?;
+        anyhow::ensure!(updated == 1, "文章已删除");
+        Ok(())
     }
 
     /// 文章计数（控制面板状态卡用）：(总数, 已采详情数, 待补数)，均不含已删除。
