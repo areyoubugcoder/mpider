@@ -91,17 +91,17 @@ pub async fn workbench_fetch_article_comments(
     state: State<'_, AppState>,
     article_id: i64,
 ) -> Result<(), String> {
-    core::comments::collect_saved_article(&state.store, article_id)
+    core::comments::fetch_comments(&state.store, article_id)
         .await
         .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
-pub async fn workbench_collect_saved_article(
+pub async fn workbench_fetch_article_interactions(
     state: State<'_, AppState>,
     article_id: i64,
 ) -> Result<(), String> {
-    core::comments::collect_saved_article(&state.store, article_id)
+    core::comments::fetch_interactions(&state.store, article_id)
         .await
         .map_err(|error| format!("{error:#}"))
 }
@@ -239,6 +239,16 @@ pub fn workbench_delete_articles(
     state
         .store
         .wb_delete_articles(article_ids)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workbench_restore_articles(
+    state: State<'_, AppState>,
+    article_ids: Vec<i64>,
+) -> Result<usize, String> {
+    state
+        .store
+        .wb_restore_articles(article_ids)
         .map_err(|e| e.to_string())
 }
 #[tauri::command]

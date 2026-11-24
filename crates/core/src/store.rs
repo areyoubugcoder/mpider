@@ -27,6 +27,15 @@ mod push_monitor;
 pub mod system_logs;
 mod workbench;
 
+/// Article-library visibility affects reads only; collection selections exclude deleted rows.
+#[derive(Clone, Copy, Default)]
+pub struct ArticleFilter<'a> {
+    pub biz: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub downloaded: Option<bool>,
+    pub include_deleted: bool,
+}
+
 /// 限流分析日志（`list_call_log` / `run_log` / `cooldown_log`）保留时长：30 天。
 pub const RATELIMIT_LOG_RETENTION_SECS: i64 = 30 * 86_400;
 /// 限流分析日志行数安全阀（每次请求一行的 `list_call_log` 最多；其余两表更少）。
@@ -2100,23 +2109,29 @@ impl Store {
         offset: i64,
         only_detail: bool,
     ) -> Result<Vec<ArticleRow>> {
-        self.list_articles_filtered(biz, limit, offset, only_detail, None, None)
+        self.list_articles_filtered(
+            ArticleFilter {
+                biz,
+                ..Default::default()
+            },
+            limit,
+            offset,
+            only_detail,
+        )
     }
 
     pub fn list_articles_filtered(
         &self,
-        biz: Option<&str>,
+        filter: ArticleFilter<'_>,
         limit: i64,
         offset: i64,
         only_detail: bool,
-        title: Option<&str>,
-        downloaded: Option<bool>,
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE is_deleted=0",
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE 1=1",
         );
-        let (filter, mut args) = Self::article_filter(biz, title, downloaded);
+        let (filter, mut args) = Self::article_filter(filter);
         sql.push_str(&filter);
         if only_detail {
             sql.push_str(" AND detail_done=1");
@@ -2206,37 +2221,31 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn article_filter(
-        biz: Option<&str>,
-        title: Option<&str>,
-        downloaded: Option<bool>,
-    ) -> (String, Vec<SqlValue>) {
+    fn article_filter(filter: ArticleFilter<'_>) -> (String, Vec<SqlValue>) {
         let mut sql = String::new();
         let mut args = Vec::new();
-        if let Some(biz) = biz {
+        if !filter.include_deleted {
+            sql.push_str(" AND is_deleted=0");
+        }
+        if let Some(biz) = filter.biz {
             sql.push_str(" AND biz=?");
             args.push(SqlValue::Text(biz.into()));
         }
-        if let Some(title) = title.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(title) = filter.title.map(str::trim).filter(|s| !s.is_empty()) {
             sql.push_str(" AND instr(lower(COALESCE(title,'')),lower(?))>0");
             args.push(SqlValue::Text(title.into()));
         }
-        if let Some(downloaded) = downloaded {
+        if let Some(downloaded) = filter.downloaded {
             sql.push_str(" AND (length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0)=?");
             args.push(SqlValue::Integer(i64::from(downloaded)));
         }
         (sql, args)
     }
 
-    pub fn count_articles_filtered(
-        &self,
-        biz: Option<&str>,
-        title: Option<&str>,
-        downloaded: Option<bool>,
-    ) -> Result<i64> {
-        let (filter, args) = Self::article_filter(biz, title, downloaded);
+    pub fn count_articles_filtered(&self, filter: ArticleFilter<'_>) -> Result<i64> {
+        let (filter, args) = Self::article_filter(filter);
         Ok(self.conn().query_row(
-            &format!("SELECT COUNT(*) FROM articles WHERE is_deleted=0{filter}"),
+            &format!("SELECT COUNT(*) FROM articles WHERE 1=1{filter}"),
             params_from_iter(args),
             |r| r.get(0),
         )?)
@@ -2249,7 +2258,12 @@ impl Store {
         title: Option<&str>,
         downloaded: Option<bool>,
     ) -> Result<Vec<i64>> {
-        let (filter, args) = Self::article_filter(biz, title, downloaded);
+        let (filter, args) = Self::article_filter(ArticleFilter {
+            biz,
+            title,
+            downloaded,
+            include_deleted: false,
+        });
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!("SELECT id FROM articles WHERE is_deleted=0{filter} ORDER BY (published_at IS NULL), published_at DESC, id DESC LIMIT 100001"))?;
         let ids = stmt
@@ -2482,6 +2496,7 @@ impl Store {
                     Ok((
                         row_id,
                         ArticleComment {
+                            content_parts: Vec::new(),
                             id: row
                                 .get::<_, Option<String>>(1)?
                                 .unwrap_or_else(|| format!("local:{row_id}")),
@@ -2504,7 +2519,12 @@ impl Store {
             page.truncate(limit);
             let next_cursor = has_more.then(|| page.last().map(|(id, _)| *id)).flatten();
             (
-                page.into_iter().map(|(_, item)| item).collect(),
+                page.into_iter()
+                    .map(|(_, mut item)| {
+                        item.render_content();
+                        item
+                    })
+                    .collect(),
                 next_cursor,
             )
         };

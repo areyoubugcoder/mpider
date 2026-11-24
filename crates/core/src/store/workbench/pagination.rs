@@ -157,7 +157,8 @@ impl Store {
     ) -> Result<WorkbenchPage<RequestEvent>> {
         validate(limit, offset)?;
         ensure!(
-            since.is_finite() && ["", "list", "body", "image", "webpage"].contains(&category),
+            since.is_finite()
+                && ["", "list", "body", "image", "webpage", "interaction"].contains(&category),
             "请求筛选无效"
         );
         let native="json_object('id',request_id,'category','list','purpose',CASE WHEN action=0 THEN 'home' ELSE 'legacy_page' END,'owner_id',job_id,'owner_kind','native','biz','','started_at',ts,'finished_at',CASE WHEN latency_ms IS NULL THEN NULL ELSE ts+latency_ms/1000.0 END,'outcome',outcome,'policy_version',policy_version,'gap_ms',gap_ms,'detail',json_object('transport',transport,'outer_ret',outer_ret,'jsapi_ret',jsapi_ret,'inner_ret',inner_ret,'reason',reason))";
@@ -445,29 +446,55 @@ mod tests {
             .unwrap();
         assert_eq!(ids.len(), 23);
         let first = s
-            .list_articles_filtered(Some("FILTER"), 10, 0, false, Some("rust"), None)
+            .list_articles_filtered(
+                crate::store::ArticleFilter {
+                    biz: Some("FILTER"),
+                    title: Some("rust"),
+                    ..Default::default()
+                },
+                10,
+                0,
+                false,
+            )
             .unwrap();
         let second = s
-            .list_articles_filtered(Some("FILTER"), 10, 10, false, Some("rust"), None)
+            .list_articles_filtered(
+                crate::store::ArticleFilter {
+                    biz: Some("FILTER"),
+                    title: Some("rust"),
+                    ..Default::default()
+                },
+                10,
+                10,
+                false,
+            )
             .unwrap();
         assert_eq!(first.iter().map(|r| r.id).collect::<Vec<_>>(), ids[..10]);
         assert_eq!(second.iter().map(|r| r.id).collect::<Vec<_>>(), ids[10..20]);
         for downloaded in [true, false] {
             let rows = s
                 .list_articles_filtered(
-                    Some("FILTER"),
+                    crate::store::ArticleFilter {
+                        biz: Some("FILTER"),
+                        title: Some("文章"),
+                        downloaded: Some(downloaded),
+                        ..Default::default()
+                    },
                     100,
                     0,
                     false,
-                    Some("文章"),
-                    Some(downloaded),
                 )
                 .unwrap();
             assert!(rows.iter().all(|r| r.has_body == downloaded));
             assert_eq!(
                 rows.len() as i64,
-                s.count_articles_filtered(Some("FILTER"), Some("文章"), Some(downloaded))
-                    .unwrap()
+                s.count_articles_filtered(crate::store::ArticleFilter {
+                    biz: Some("FILTER"),
+                    title: Some("文章"),
+                    downloaded: Some(downloaded),
+                    ..Default::default()
+                })
+                .unwrap()
             );
             assert_eq!(
                 rows.iter().map(|r| r.id).collect::<Vec<_>>(),
@@ -493,6 +520,66 @@ mod tests {
                 .unwrap()
                 .len(),
             22
+        );
+    }
+
+    #[test]
+    fn including_deleted_articles_keeps_filters_counts_and_page_order_without_restoring() {
+        use crate::store::ArticleFilter;
+        let store = Store::open_in_memory().unwrap();
+        let mut ids = Vec::new();
+        for (biz, mid, title, body) in [
+            ("A", "1", "匹配一", "正文"),
+            ("A", "2", "匹配二", "正文"),
+            ("A", "3", "其他", "正文"),
+            ("B", "4", "匹配四", "正文"),
+            ("A", "5", "匹配五", ""),
+        ] {
+            ids.push(
+                store
+                    .upsert_article(
+                        biz,
+                        mid,
+                        1,
+                        &crate::ArticleFields {
+                            title: Some(title.into()),
+                            content_md: Some(body.into()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap(),
+            );
+        }
+        store.wb_delete_articles(vec![ids[1]]).unwrap();
+        let filter = ArticleFilter {
+            biz: Some("A"),
+            title: Some("匹配"),
+            downloaded: Some(true),
+            include_deleted: true,
+        };
+        assert_eq!(store.count_articles_filtered(filter).unwrap(), 2);
+        let first = store.list_articles_filtered(filter, 1, 0, false).unwrap();
+        let second = store.list_articles_filtered(filter, 1, 1, false).unwrap();
+        assert_eq!((first[0].id, first[0].is_deleted), (ids[1], 1));
+        assert_eq!((second[0].id, second[0].is_deleted), (ids[0], 0));
+        assert_eq!(
+            store
+                .count_articles_filtered(ArticleFilter {
+                    include_deleted: false,
+                    ..filter
+                })
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .article_selection_ids(Some("A"), Some("匹配"), Some(true))
+                .unwrap(),
+            vec![ids[0]]
+        );
+        assert_eq!(
+            store.get_article_md(ids[1]).unwrap().unwrap().0.is_deleted,
+            1
         );
     }
 

@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { articleExportProgress, type ArticleExportProgress } from "./export-progress.ts";
 export interface Policy {
   version: number; list_min_ms: number; list_max_ms: number; list_daily_budget: number;
-  body_gap_ms: number; body_daily_budget: number; image_gap_ms: number; body_workers: number; image_workers: number;
+  interaction_gap_ms: number; body_gap_ms: number; body_daily_budget: number; image_gap_ms: number; body_workers: number; image_workers: number;
   retries: number; rebuild_limit: number; cooldown_until: number; cooldown_seconds: number;
 }
 export interface Source {
@@ -97,6 +97,7 @@ export const recoverSession = (id: number) => invoke<void>("workbench_recover_se
 
 export const downloadArticles = (articleIds: number[]) => invoke<DownloadReceipt>("workbench_download_articles", { articleIds });
 export const exportArticles = (articleIds: number[]) => exportWithProgress({ articleIds });
+export const restoreArticles = (articleIds: number[]) => invoke<number>("workbench_restore_articles", { articleIds });
 export const deleteArticles = (articleIds: number[]) => invoke<number>("workbench_delete_articles", { articleIds });
 export interface SourceDeletion { deleted_articles: number; cancelled_tasks: number; cancelled_experiments: number; cleanup_pending: number }
 export const deleteSource = (biz: string) => invoke<SourceDeletion>("workbench_delete_source", { biz });
@@ -120,6 +121,7 @@ export const exportExperiment = (id: number) => invoke<{ path: string; count: nu
 export const articleBodyStates = (articleIds: number[]) => invoke<Record<number,boolean>>("workbench_article_body_states", { articleIds });
 
 export interface ArticleComment {
+  content_parts?: { text: string; url: string | null }[];
   id: string;
   author: string;
   content: string;
@@ -148,5 +150,7 @@ export const fetchArticleComments = (articleId: number) =>
 export const importRenderedComments = (articleId: number) =>
   invoke<number>("workbench_import_rendered_comments", { articleId });
 
-export const collectSavedArticle = (articleId: number) =>
-  invoke<void>("workbench_collect_saved_article", { articleId });
+export type ArticleCollection = "interactions" | "comments";
+
+export const fetchArticleInteractions = (articleId: number) =>
+  invoke<void>("workbench_fetch_article_interactions", { articleId });

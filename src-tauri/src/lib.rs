@@ -985,6 +985,7 @@ fn seed_server_status() -> mpider_core::seedserver::SeedServerStatus {
 #[derive(Serialize)]
 struct ArticleItem {
     has_body: bool,
+    is_deleted: bool,
     interactions: mpider_core::workbench::interactions::ArticleInteractions,
     id: i64,
     biz: String,
@@ -1016,21 +1017,26 @@ fn list_articles(
     offset: Option<i64>,
     title: Option<String>,
     downloaded: Option<bool>,
+    include_deleted: Option<bool>,
 ) -> Result<ArticlePage, String> {
+    let filter = mpider_core::store::ArticleFilter {
+        biz: biz.as_deref(),
+        title: title.as_deref(),
+        downloaded,
+        include_deleted: include_deleted.unwrap_or(false),
+    };
     let rows = state
         .store
         .list_articles_filtered(
-            biz.as_deref(),
+            filter,
             limit.unwrap_or(200).clamp(1, 1000),
             offset.unwrap_or(0),
             false,
-            title.as_deref(),
-            downloaded,
         )
         .map_err(|e| e.to_string())?;
     let total = state
         .store
-        .count_articles_filtered(biz.as_deref(), title.as_deref(), downloaded)
+        .count_articles_filtered(filter)
         .map_err(|e| e.to_string())?;
     let nick: std::collections::HashMap<String, Option<String>> = state
         .store
@@ -1043,6 +1049,7 @@ fn list_articles(
         .into_iter()
         .map(|r| ArticleItem {
             has_body: r.has_body,
+            is_deleted: r.is_deleted != 0,
             interactions: r.interactions,
             account: nick.get(&r.biz).cloned().flatten(),
             id: r.id,
@@ -2631,7 +2638,7 @@ pub fn run() {
             workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
             workbench::workbench_fetch_article_comments,
-            workbench::workbench_collect_saved_article,
+            workbench::workbench_fetch_article_interactions,
             workbench::workbench_import_rendered_comments,
             workbench::workbench_article_comments,
             workbench::workbench_source_page,
@@ -2654,6 +2661,7 @@ pub fn run() {
             workbench::workbench_download_articles,
             workbench::workbench_export_articles,
             workbench::workbench_delete_articles,
+            workbench::workbench_restore_articles,
             workbench::workbench_delete_source,
             workbench::workbench_export_source,
             workbench::workbench_task_action,

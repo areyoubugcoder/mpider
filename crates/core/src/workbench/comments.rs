@@ -2,11 +2,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod content;
+pub use content::CommentPart;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArticleComment {
     pub id: String,
     pub author: String,
     pub content: String,
+    #[serde(default, skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    pub content_parts: Vec<CommentPart>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
     pub likes: Option<i64>,
@@ -286,6 +291,7 @@ pub(super) fn parse_comment(value: &Value, depth: u8) -> Option<ArticleComment> 
         id,
         author,
         content,
+        content_parts: Vec::new(),
         images,
         likes: number(&["reply_like_num", "like_num", "like_count", "likeCount"]),
         created_at,
@@ -309,8 +315,22 @@ pub async fn fetch_page(store: &crate::Store, article_id: i64) -> anyhow::Result
     fetch_page_from(store, article_id, false).await
 }
 
-pub async fn collect_saved_article(store: &crate::Store, article_id: i64) -> anyhow::Result<()> {
-    super::authenticated_comments::collect(store, article_id).await
+pub async fn fetch_interactions(store: &crate::Store, article_id: i64) -> anyhow::Result<()> {
+    super::authenticated_comments::collect(
+        store,
+        article_id,
+        super::authenticated_comments::Collection::Interactions,
+    )
+    .await
+}
+
+pub async fn fetch_comments(store: &crate::Store, article_id: i64) -> anyhow::Result<()> {
+    super::authenticated_comments::collect(
+        store,
+        article_id,
+        super::authenticated_comments::Collection::Comments,
+    )
+    .await
 }
 pub(super) static FETCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -584,7 +604,15 @@ async fn public_get(
     limit: usize,
 ) -> anyhow::Result<Vec<u8>> {
     let is_json = url.path() == "/mp/appmsg_comment";
-    send_request(store, client.get(url), article, limit, is_json).await
+    send_request(
+        store,
+        client.get(url),
+        article,
+        limit,
+        is_json,
+        "article_comments",
+    )
+    .await
 }
 
 pub(super) async fn send_request(
@@ -593,19 +621,17 @@ pub(super) async fn send_request(
     article: &crate::model::ArticleRow,
     limit: usize,
     is_comment_request: bool,
+    purpose: &str,
 ) -> anyhow::Result<Vec<u8>> {
     use crate::model::now;
     use anyhow::ensure;
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(12);
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_millis(store.wb_policy()?.interaction_gap_ms)
+        + std::time::Duration::from_secs(12);
     let request_id = loop {
-        let permit = store.wb_request_permit(
-            "webpage",
-            "article_comments",
-            article.id,
-            &article.biz,
-            now(),
-        )?;
+        let permit =
+            store.wb_request_permit("interaction", purpose, article.id, &article.biz, now())?;
         if let Some(id) = permit.request_id {
             break id;
         }
@@ -657,7 +683,11 @@ pub(super) async fn send_request(
                 .filter_map(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
                 .find(|n| *n != 0);
                 if let Some(ret) = business_ret {
-                    anyhow::bail!("微信留言接口返回业务码 {ret}");
+                    return Err(super::authenticated_comments::access_error(
+                        store,
+                        article,
+                        &format!("微信拒绝了本次数据请求（业务码 {ret}）"),
+                    ));
                 }
             }
         }
@@ -786,10 +816,10 @@ mod tests {
     }
 
     #[test]
-    fn comment_requests_use_article_slots_without_a_push_monitor() {
+    fn comment_requests_use_interaction_gate_without_push_monitor() {
         let store = crate::Store::open_in_memory().unwrap();
         let permit = store
-            .wb_request_permit("webpage", "article_comments", 1, "B", 100.)
+            .wb_request_permit("interaction", "article_comments", 1, "B", 100.)
             .unwrap();
         assert!(permit.request_id.is_some());
         assert!(store

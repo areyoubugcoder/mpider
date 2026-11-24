@@ -138,6 +138,7 @@ fn from_item(root: ElementRef<'_>, reply: bool, depth: u8) -> Option<ArticleComm
         Vec::new()
     };
     Some(ArticleComment {
+        content_parts: Vec::new(),
         id: id.to_owned(),
         author,
         content,

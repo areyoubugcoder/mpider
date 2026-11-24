@@ -26,7 +26,9 @@ function CommentThread({ comment, depth = 0 }: { comment: ArticleComment; depth?
         </div>
         <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed">
           {comment.reply_to && <span className="text-muted-foreground">回复 {comment.reply_to} </span>}
-          {comment.content}
+          {comment.content_parts?.length ? comment.content_parts.map((part, index) => part.url
+            ? <button key={index} type="button" className="inline break-all text-left text-link underline" title="在默认浏览器打开" onClick={() => void openExternal(part.url!).catch(error => toast.error(String(error)))}>{part.text}</button>
+            : part.text) : comment.content}
         </p>
         {!!comment.images?.length && <div className="mt-2 flex flex-wrap gap-3">
           {comment.images.map((url, index) => <button key={url} type="button" className="text-xs text-link hover:underline"
@@ -76,7 +78,7 @@ export function ArticleComments({
     try {
       await fetchArticleComments(article.id);
       await query.refetch({ throwOnError: true });
-      setMessage("补采完成，互动和留言已更新。");
+      setMessage("评论已更新。");
     } catch (error) {
       setRemoteError(String(error));
     } finally {
@@ -100,7 +102,7 @@ export function ArticleComments({
       </DialogHeader>
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-2">
         <Button size="sm" variant="outline" disabled={fetchingRemote} onClick={() => void refreshComments()}>
-          {fetchingRemote ? "正在补采…" : "补采互动和评论"}
+          {fetchingRemote ? "正在获取评论…" : "获取评论"}
         </Button>
         {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
         {remoteError && <p role="alert" className="w-full text-sm text-destructive">{remoteError}</p>}

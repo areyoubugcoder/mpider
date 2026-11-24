@@ -28,6 +28,7 @@ pub struct Policy {
     pub body_gap_ms: u64,
     pub body_daily_budget: i64,
     pub image_gap_ms: u64,
+    pub interaction_gap_ms: u64,
     pub body_workers: usize,
     pub image_workers: usize,
     pub retries: u32,
@@ -39,12 +40,13 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             version: 1,
-            list_min_ms: 90000,
-            list_max_ms: 120000,
+            list_min_ms: 3000,
+            list_max_ms: 5000,
             list_daily_budget: 60,
-            body_gap_ms: 1000,
+            body_gap_ms: 200,
             body_daily_budget: 86400,
-            image_gap_ms: 1000,
+            image_gap_ms: 200,
+            interaction_gap_ms: 1000,
             body_workers: 4,
             image_workers: 4,
             retries: 2,
@@ -61,7 +63,9 @@ impl Policy {
             "列表间隔范围无效"
         );
         ensure!(
-            self.body_gap_ms <= 86400000 && self.image_gap_ms <= 86400000,
+            self.body_gap_ms <= 86400000
+                && self.image_gap_ms <= 86400000
+                && self.interaction_gap_ms <= 86400000,
             "请求间隔不能超过一天"
         );
         ensure!(self.list_daily_budget > 0, "列表预算须为正数");

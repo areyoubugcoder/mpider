@@ -15,7 +15,7 @@ import { HomeSyncStatus, SessionRecoveryPanel } from "@/components/HomeSync";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { articleSelectionIds, coreHealth } from "@/lib/tauri";
-import { collectSavedArticle, type Task, workbenchSnapshot } from "@/lib/workbench";
+import { fetchArticleInteractions, fetchArticleComments, type ArticleCollection, type Task, workbenchSnapshot } from "@/lib/workbench";
 import { WorkbenchSources, WorkbenchTasks, WorkbenchArticles, WorkbenchRate, WorkbenchSettings } from "@/views/Workbench";
 import { CursorLab } from "@/views/CursorLab";
 import { SystemLogs } from "@/views/SystemLogs";
@@ -39,27 +39,30 @@ export function App() {
   const [collecting, setCollecting] = useState(false);
   const [progress, setProgress] = useState("");
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
-  async function collectAccount(biz: string) {
-    if (!biz || queueLock.current) return;
+  async function collectArticles(target: { biz: string } | { ids: number[] }, kind: ArticleCollection) {
+    const name = kind === "interactions" ? "互动数据" : "评论";
+    const fetch = kind === "interactions" ? fetchArticleInteractions : fetchArticleComments;
+    if (queueLock.current) return;
     queueLock.current = true;
     setCollecting(true);
     setBatchErrors([]);
-    setProgress("正在读取公众号文章…");
+    setProgress("正在准备所选文章…");
     try {
-      const ids = await articleSelectionIds(biz);
+      const ids = "biz" in target ? await articleSelectionIds(target.biz) : [...new Set(target.ids)];
       const errors: string[] = [];
       for (const [index, id] of ids.entries()) {
-        setProgress(`互动/评论采集中：${index + 1}/${ids.length}`);
+        setProgress(`${name}获取中：${index + 1}/${ids.length}`);
         try {
-          await collectSavedArticle(id);
+          await fetch(id);
         } catch (error) {
           errors.push(`文章 ${id}：${String(error)}`);
+          setBatchErrors([...errors]);
         }
       }
       setBatchErrors(errors);
-      setProgress(ids.length ? `互动/评论采集结束：成功 ${ids.length - errors.length}/${ids.length}，失败 ${errors.length}` : "该公众号暂无文章");
+      setProgress(ids.length ? `${name}获取结束：成功 ${ids.length - errors.length}/${ids.length}，失败 ${errors.length}` : "没有可采集的文章");
     } catch (error) {
-      setProgress("互动/评论入队失败");
+      setProgress(`${name}获取失败`);
       setBatchErrors([String(error)]);
     } finally {
       queueLock.current = false;
@@ -76,10 +79,11 @@ export function App() {
         {snapshot.error && <p role="alert" className="mb-4 rounded-lg border border-destructive p-3 text-sm">无法读取持久化工作台：{String(snapshot.error)}。请检查数据库和后台日志。</p>}
         {!!snapshot.data && snapshot.data.policy.cooldown_until > Date.now() / 1000 && <p role="status" className="mb-4 rounded-lg border p-3 text-sm text-warning">全局冷却至 {new Date(snapshot.data.policy.cooldown_until * 1000).toLocaleString()}，列表、文章下载和图片请求等待；推送解析遵从文章间隔及预算。</p>}
         <SessionRecoveryPanel snapshot={snapshot.data} />
-        {view === "accounts" && <WorkbenchSources onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
+        {!!batchErrors.length && <section role="alert" className="mb-4 rounded-lg border border-warning/40 bg-card p-3 text-sm"><div className="flex items-center justify-between gap-3"><p className="font-medium">部分文章未能获取数据，请按提示操作后重试</p><button type="button" className="shrink-0 text-xs text-link" onClick={() => setBatchErrors([])}>收起提示</button></div><ul className="mt-2 max-h-48 space-y-2 overflow-y-auto text-xs text-muted-foreground">{batchErrors.map((error, i) => <li key={i}>{error}</li>)}</ul></section>}
+        {view === "accounts" && <WorkbenchSources collecting={collecting} onCollect={(biz, kind) => collectArticles({ biz }, kind)} onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "push-monitor" && <PushMonitor onRate={() => setView("ratelimit")} onArticles={biz => { setArticleSource(biz); setView("articles"); }} />}
         {view === "jobs" && <WorkbenchTasks kind={taskKind} onKindChange={setTaskKind} />}
-        {view === "articles" && <WorkbenchArticles collecting={collecting} onCollect={collectAccount} key={articleSource} biz={articleSource} onBizChange={setArticleSource} />}
+        {view === "articles" && <WorkbenchArticles collecting={collecting} onCollect={(ids, kind) => collectArticles({ ids }, kind)} key={articleSource} biz={articleSource} onBizChange={setArticleSource} />}
         {view === "ratelimit" && <WorkbenchRate />}
         {showLaboratory && view === "lab" && <CursorLab onLogs={id => { setLogExperiment(id); setView("logs"); }} />}
         {view === "settings" && <WorkbenchSettings showLaboratory={showLaboratory} onLaboratoryChange={changeLaboratory} />}

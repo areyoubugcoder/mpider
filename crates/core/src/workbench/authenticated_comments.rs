@@ -9,6 +9,36 @@ use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 use std::{collections::HashSet, time::Duration};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Collection {
+    Interactions,
+    Comments,
+}
+impl Collection {
+    fn purpose(self) -> &'static str {
+        match self {
+            Self::Interactions => "article_interactions",
+            Self::Comments => "article_comments",
+        }
+    }
+}
+
+/// Display recovery steps at every article entry point, including batch failures.
+pub(super) fn access_error(store: &Store, article: &ArticleRow, reason: &str) -> anyhow::Error {
+    let nickname = store
+        .wb_source(&article.biz)
+        .ok()
+        .flatten()
+        .map(|source| source.nickname)
+        .unwrap_or_default();
+    let publisher = if nickname.trim().is_empty() {
+        "该公众号".to_owned()
+    } else {
+        format!("「{}」公众号", nickname.trim())
+    };
+    anyhow::anyhow!("{reason}。请在专机微信中打开{publisher}的一篇文章，等待页面加载完成后，回到 MPider 重试；如果文章已打开，请刷新或重新进入。仍无法获取时，请打开当前要采集的文章后重试。")
+}
+
 const LIMIT: usize = 100;
 const MAX_PAGES: usize = 100;
 fn number(v: &Value) -> Option<i64> {
@@ -35,13 +65,11 @@ fn literal(html: &str, name: &str) -> Option<String> {
     (values.len() == 1).then(|| values.into_iter().next().unwrap())
 }
 pub(super) fn stats(v: &Value) -> Result<ArticleInteractions> {
-    let s = v
-        .get("appmsgstat")
-        .context("微信未返回互动统计，请在微信中刷新原文后重试")?;
+    let s = v.get("appmsgstat").context("微信未返回互动统计")?;
     ensure!(
         s.get("ret").and_then(number) == Some(0)
             && s.get("is_login").and_then(Value::as_bool) == Some(true),
-        "微信文章会话已失效，请刷新原文后重试"
+        "微信文章会话已失效"
     );
     let count = |key: &str| s.get(key).and_then(number);
     let raw = count("read_num");
@@ -61,11 +89,13 @@ async fn json(
     req: reqwest::RequestBuilder,
     article: &ArticleRow,
     budget: &mut usize,
+    purpose: &str,
 ) -> Result<Value> {
     ensure!(*budget > 0, "本次补采达到请求上限，已保留已采集结果");
     *budget -= 1;
-    let bytes = comments::send_request(store, req, article, 4 * 1024 * 1024, true).await?;
-    serde_json::from_slice(&bytes).context("微信没有返回可读取的数据，请刷新原文后重试")
+    let bytes = comments::send_request(store, req, article, 4 * 1024 * 1024, true, purpose).await?;
+    serde_json::from_slice(&bytes)
+        .map_err(|_| access_error(store, article, "微信没有返回可读取的数据"))
 }
 fn buffer(v: &Value) -> Result<String> {
     let b = v.get("buffer").and_then(Value::as_str).unwrap_or("");
@@ -73,10 +103,10 @@ fn buffer(v: &Value) -> Result<String> {
     Ok(b.into())
 }
 
-pub(super) async fn collect(store: &Store, id: i64) -> Result<()> {
+pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> Result<()> {
     let _lock = comments::FETCH
         .try_lock()
-        .map_err(|_| anyhow::anyhow!("正在读取留言，请稍后再试"))?;
+        .map_err(|_| anyhow::anyhow!("正在获取文章数据，请稍后再试"))?;
     let (article, _) = store.get_article_md(id)?.context("文章不存在")?;
     ensure!(article.is_deleted == 0, "文章已删除");
     let mid = article.mid.clone().context("文章缺少消息 ID")?;
@@ -87,7 +117,8 @@ pub(super) async fn collect(store: &Store, id: i64) -> Result<()> {
     let session =
         tokio::task::spawn_blocking(move || article_session::discover(&biz, &scan_mid, idx, &link))
             .await
-            .context("读取微信文章会话失败")??;
+            .context("读取微信文章会话失败")?
+            .map_err(|error| access_error(store, &article, &error.to_string()))?;
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(18))
@@ -116,71 +147,75 @@ pub(super) async fn collect(store: &Store, id: i64) -> Result<()> {
         &article,
         6 * 1024 * 1024,
         false,
+        collection.purpose(),
     )
     .await?;
     let html = std::str::from_utf8(&html).context("微信文章编码异常")?;
-    ensure!(
-        literal(html, "biz").as_deref() == Some(article.biz.as_str())
-            && literal(html, "mid").as_deref() == Some(mid.as_str())
-            && literal(html, "idx").and_then(|s| s.parse::<i64>().ok()) == Some(idx),
-        "微信原文身份无法核对，请打开该文章后重试"
-    );
+    if literal(html, "biz").as_deref() != Some(article.biz.as_str())
+        || literal(html, "mid").as_deref() != Some(mid.as_str())
+        || literal(html, "idx").and_then(|s| s.parse::<i64>().ok()) != Some(idx)
+    {
+        return Err(access_error(
+            store,
+            &article,
+            "微信未返回可核对身份的文章页面",
+        ));
+    }
     let token = session
         .fields
         .get("appmsg_token")
         .cloned()
         .or_else(|| literal(html, "appmsg_token"))
         .filter(|s| !s.is_empty())
-        .context("微信未提供文章访问令牌，请刷新原文后重试")?;
+        .ok_or_else(|| access_error(store, &article, "微信未提供文章访问令牌"))?;
     let comment_id =
         comments::id_from_html(html).or_else(|| session.fields.get("comment_id").cloned());
     let mut budget = 100usize;
-    let stat_url = session.endpoint("/mp/getappmsgext", &article.biz, &token);
-    let mut form = vec![
-        ("__biz", article.biz.clone()),
-        ("mid", mid.clone()),
-        ("idx", idx.to_string()),
-        ("sn", session.fields["sn"].clone()),
-        ("comment_id", comment_id.clone().unwrap_or_default()),
-        (
-            "appmsg_type",
-            literal(html, "appmsg_type").unwrap_or_else(|| "9".into()),
-        ),
-        ("is_need_ad", "0".into()),
-        ("is_need_reward", "0".into()),
-        ("is_need_ticket", "0".into()),
-        ("is_only_read", "1".into()),
-        ("appmsg_like_type", "1".into()),
-        ("tmp_version", "1".into()),
-    ];
-    for k in ["devicetype", "version", "pass_ticket"] {
-        if let Some(v) = session.fields.get(k) {
-            form.push((k, v.clone()));
+    if collection == Collection::Interactions {
+        let stat_url = session.endpoint("/mp/getappmsgext", &article.biz, &token);
+        let mut form = vec![
+            ("__biz", article.biz.clone()),
+            ("mid", mid.clone()),
+            ("idx", idx.to_string()),
+            ("sn", session.fields["sn"].clone()),
+            ("comment_id", comment_id.clone().unwrap_or_default()),
+            (
+                "appmsg_type",
+                literal(html, "appmsg_type").unwrap_or_else(|| "9".into()),
+            ),
+            ("is_need_ad", "0".into()),
+            ("is_need_reward", "0".into()),
+            ("is_need_ticket", "0".into()),
+            ("is_only_read", "1".into()),
+            ("appmsg_like_type", "1".into()),
+            ("tmp_version", "1".into()),
+        ];
+        for k in ["devicetype", "version", "pass_ticket"] {
+            if let Some(v) = session.fields.get(k) {
+                form.push((k, v.clone()));
+            }
         }
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(form)
+            .finish();
+        let payload = json(
+            store,
+            client
+                .post(stat_url)
+                .header("Referer", session.page.as_str())
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body),
+            &article,
+            &mut budget,
+            collection.purpose(),
+        )
+        .await?;
+        let metrics =
+            stats(&payload).map_err(|error| access_error(store, &article, &error.to_string()))?;
+        return store.save_article_interactions(id, &metrics);
     }
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .extend_pairs(form)
-        .finish();
-    let payload = json(
-        store,
-        client
-            .post(stat_url)
-            .header("Referer", session.page.as_str())
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body),
-        &article,
-        &mut budget,
-    )
-    .await?;
-    let metrics = stats(&payload)?;
-    store.save_article_interactions(id, &metrics)?;
-    if payload.get("comment_enabled").and_then(number) == Some(0)
-        || metrics.comment_count == Some(0)
-    {
-        let previous = store.article_comment_position(id)?;
-        return store.save_article_comment_batch(id, &metrics, &[], Some((previous, -1)));
-    }
-    let comment_id = comment_id.context("已保存互动统计，但原文没有可读取的留言标识")?;
+    let mut metrics = ArticleInteractions::default();
+    let comment_id = comment_id.context("原文没有可读取的留言标识")?;
     // The upstream buffer is session-bound: retries restart the listing and merge by ID.
     store.resume_or_refresh_comments(id)?;
     let previous = store.article_comment_position(id)?;
@@ -202,8 +237,13 @@ pub(super) async fn collect(store: &Store, id: i64) -> Result<()> {
             client.get(u).header("Referer", session.page.as_str()),
             &article,
             &mut budget,
+            collection.purpose(),
         )
         .await?;
+        metrics.comment_count = payload
+            .get("total_count")
+            .and_then(number)
+            .or(metrics.comment_count);
         let raw = payload
             .get("elected_comment")
             .and_then(Value::as_array)
@@ -320,6 +360,7 @@ async fn replies(request: ReplyRequest<'_>, raw: &Value, row: &mut ArticleCommen
             client.get(u).header("Referer", session.page.as_str()),
             article,
             budget,
+            Collection::Comments.purpose(),
         )
         .await?;
         let list = v

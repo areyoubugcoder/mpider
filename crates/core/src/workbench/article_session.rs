@@ -420,7 +420,7 @@ pub(super) fn discover(biz: &str, mid: &str, idx: i64, link: &str) -> Result<Ses
             return source.retarget(link, biz, mid, idx);
         }
     }
-    best.ok_or_else(|| anyhow::anyhow!("没有可复用的微信会话，请打开该公众号任一文章后重试补采"))
+    best.ok_or_else(|| anyhow::anyhow!("没有可复用的微信文章会话"))
 }
 
 #[cfg(test)]
