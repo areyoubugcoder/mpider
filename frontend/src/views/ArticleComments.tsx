@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { openExternal } from "@/lib/tauri";
 import { toast } from "sonner";
+import { TaskPrimaryAction } from "@/components/TaskRowActions";
+import { canCancelTask } from "@/lib/action-visibility";
 import { ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { articleComments, fetchArticleComments, type ArticleComment } from "@/lib/workbench";
+import { articleComments, articleCollectionTask, fetchArticleComments, taskAction, type ArticleComment } from "@/lib/workbench";
 
 const REPLIES_PER_PAGE = 3;
 
@@ -56,11 +58,18 @@ export function ArticleComments({
   article: { id: number; title: string; count: number | null };
   onClose: () => void;
 }) {
+  const remote = useQuery({queryKey:["article-collection-task",article.id],queryFn:()=>articleCollectionTask(article.id,"comments"),refetchInterval:700});
+  const task=remote.data;
+  const finished=task?.progress.finished_ids.includes(article.id);
+  const active=!!task && !finished && ["queued","running"].includes(task.state);
+  const pending=!!task && !finished && canCancelTask(task);
+  const current=task?.progress.collection?.article_id===article.id ? task.progress.collection : null;
   const query = useInfiniteQuery({
     queryKey: ["article-comments", article.id],
     initialPageParam: null as number | null,
     queryFn: ({ pageParam }) => articleComments(article.id, pageParam),
     getNextPageParam: page => page.next_cursor ?? undefined,
+    refetchInterval: active ? 1500 : false,
   });
   const pages = query.data?.pages;
   const newest = pages?.[pages.length - 1];
@@ -71,14 +80,16 @@ export function ArticleComments({
   const [message, setMessage] = useState<string | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const canFetchRemote = newest?.can_fetch_more === true;
+  useEffect(()=>{if(task)void query.refetch();},[task?.updated_at]);
+  async function runTask(action:()=>Promise<unknown>) {setFetchingRemote(true);try{await action();await remote.refetch();}catch(error){setRemoteError(String(error));}finally{setFetchingRemote(false);}}
   async function refreshComments() {
     setFetchingRemote(true);
     setRemoteError(null);
     setMessage(null);
     try {
       await fetchArticleComments(article.id);
-      await query.refetch({ throwOnError: true });
-      setMessage("评论已更新。");
+      await remote.refetch({ throwOnError: true });
+      setMessage("评论任务已创建，可暂停或取消。");
     } catch (error) {
       setRemoteError(String(error));
     } finally {
@@ -101,9 +112,15 @@ export function ArticleComments({
         <DialogDescription className="line-clamp-2">{article.title}</DialogDescription>
       </DialogHeader>
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-2">
-        <Button size="sm" variant="outline" disabled={fetchingRemote} onClick={() => void refreshComments()}>
-          {fetchingRemote ? "正在获取评论…" : "获取评论"}
+        <Button size="sm" variant="outline" disabled={fetchingRemote || pending} onClick={() => void refreshComments()}>
+          {fetchingRemote ? "正在创建…" : active ? "正在获取评论…" : cached || newest?.can_fetch_more === false ? "刷新评论数据" : "获取评论"}
         </Button>
+        {task && !finished && canCancelTask(task) && <><TaskPrimaryAction task={task} busy={fetchingRemote} run={runTask} /><Button size="sm" variant="ghost" disabled={fetchingRemote} onClick={()=>void runTask(()=>taskAction(task.id,"cancel"))}>取消任务</Button></>}
+        {task && <div role="status" className="w-full space-y-1 text-xs text-muted-foreground">
+          {current && <><p>{current.pages ? `已获取第 1${current.pages>1?`～${current.pages}`:""} 页留言` : active ? "正在准备或获取第 1 页留言" : "本次尚未获取留言分页"}{current.reply_pages>0?` · 已补采 ${current.reply_pages} 页回复`:""}</p><p>新增 {current.added} 条 · 更新 {current.updated} 条 · 未变化 {current.unchanged} 条</p></>}
+          <p>{finished ? "本篇评论已更新" : task.state==="paused" ? "任务已暂停，已保存的评论保留；点击继续后将比对并补齐。" : task.state==="cancelled" ? "任务已取消，已保存的评论保留。" : active && !current ? "已进入队列，等待前面的文章完成。" : ""}</p>
+          {!finished && task.reason && ["needs_action","failed"].includes(task.state) && <p role="alert" className="text-destructive">{task.reason}</p>}
+        </div>}
         {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}
         {remoteError && <p role="alert" className="w-full text-sm text-destructive">{remoteError}</p>}
       </div>
@@ -118,7 +135,7 @@ export function ArticleComments({
         </div>}
         {comments.length > 0 && <ol aria-label="文章留言">{comments.map(comment => <CommentThread key={comment.id} comment={comment} />)}</ol>}
         {(query.hasNextPage || canFetchRemote) && <div className="py-3 text-center">
-          <Button size="sm" variant="outline" disabled={query.isFetchingNextPage || fetchingRemote} onClick={() => void loadMore()}>
+          <Button size="sm" variant="outline" disabled={query.isFetchingNextPage || fetchingRemote || (!query.hasNextPage && active)} onClick={() => void loadMore()}>
             {query.isFetchingNextPage || fetchingRemote ? "正在加载…" : remoteError || query.isFetchNextPageError ? "重试" : comments.length ? "加载更多" : reported === 0 ? "刷新留言" : "获取留言"}
           </Button>
         </div>}

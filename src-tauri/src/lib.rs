@@ -984,6 +984,7 @@ fn seed_server_status() -> mpider_core::seedserver::SeedServerStatus {
 /// 「公众号文章」页的一行（在 ArticleRow 基础上补公众号昵称，前端免二次查询）。
 #[derive(Serialize)]
 struct ArticleItem {
+    collection: mpider_core::store::CollectionStatus,
     has_body: bool,
     is_deleted: bool,
     interactions: mpider_core::workbench::interactions::ArticleInteractions,
@@ -1045,9 +1046,14 @@ fn list_articles(
         .into_iter()
         .map(|a| (a.biz, a.nickname))
         .collect();
+    let states = state
+        .store
+        .wb_collection_statuses(&rows.iter().map(|r| r.id).collect::<Vec<_>>())
+        .map_err(|e| e.to_string())?;
     let items = rows
         .into_iter()
         .map(|r| ArticleItem {
+            collection: states.get(&r.id).cloned().unwrap_or_default(),
             has_body: r.has_body,
             is_deleted: r.is_deleted != 0,
             interactions: r.interactions,
@@ -2638,6 +2644,8 @@ pub fn run() {
             workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
             workbench::workbench_fetch_article_comments,
+            workbench::workbench_collection_create,
+            workbench::workbench_article_collection_task,
             workbench::workbench_fetch_article_interactions,
             workbench::workbench_import_rendered_comments,
             workbench::workbench_article_comments,

@@ -70,7 +70,7 @@ impl Store {
     pub fn wb_task_page(&self, kind: &str, limit: i64, offset: i64) -> Result<WorkbenchPage<Task>> {
         validate(limit, offset)?;
         ensure!(
-            ["home", "history", "archive"].contains(&kind),
+            ["home", "history", "archive", "interactions", "comments"].contains(&kind),
             "任务类型无效"
         );
         let mut conn = self.conn();

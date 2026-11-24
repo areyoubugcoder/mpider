@@ -87,6 +87,31 @@ pub fn workbench_article_comments(
 }
 
 #[tauri::command]
+pub fn workbench_collection_create(
+    state: State<'_, AppState>,
+    kind: String,
+    biz: Option<String>,
+    article_ids: Option<Vec<i64>>,
+    refresh: bool,
+) -> Result<mpider_core::store::CollectionReceipt, String> {
+    state
+        .store
+        .wb_collection_enqueue(&kind, biz, article_ids.unwrap_or_default(), refresh)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workbench_article_collection_task(
+    state: State<'_, AppState>,
+    article_id: i64,
+    kind: String,
+) -> Result<Option<Task>, String> {
+    state
+        .store
+        .wb_article_collection_task(article_id, &kind)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn workbench_fetch_article_comments(
     state: State<'_, AppState>,
     article_id: i64,

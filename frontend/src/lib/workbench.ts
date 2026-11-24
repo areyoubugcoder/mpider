@@ -16,7 +16,9 @@ export interface CursorRecord {
   id: number; biz: string; session_id: string; parent_id: number | null; source_page: number | null; hash: string;
   observed_at: number; last_success_at: number | null; state: string;
 }
+export interface CollectionProgress { epoch: number; article_id: number | null; title: string; pages: number; reply_pages: number; added: number; updated: number; unchanged: number }
 export interface Progress {
+  collection?: CollectionProgress | null;
   session_recovery?: { discovery_id: number; requested_at: number; previous_session_id: string; phase: string } | null;
   blocked_session_id?: string | null;
   received_articles?: number | null;
@@ -24,8 +26,8 @@ export interface Progress {
   rebuilds: number; rebuilding: boolean; finished_ids: number[];
 }
 export interface Task {
-  id: number; kind: "history" | "home" | "archive"; biz: string | null; state: string;
-  target: { count?: number; cutoff_at?: number; pages?: number; cursor_id?: number; article_ids?: number[]; download_only?: boolean };
+  id: number; kind: "history" | "home" | "archive" | "interactions" | "comments"; biz: string | null; state: string;
+  target: { count?: number; cutoff_at?: number; pages?: number; cursor_id?: number; article_ids?: number[]; download_only?: boolean; refresh?: boolean };
   progress: Progress; reason: string | null; next_action_at: number; created_at: number;
   updated_at: number; result_path: string | null;
 }
@@ -145,7 +147,7 @@ export const articleComments = (articleId: number, after: number | null) =>
   invoke<ArticleCommentsPage>("workbench_article_comments", { articleId, after });
 
 export const fetchArticleComments = (articleId: number) =>
-  invoke<void>("workbench_fetch_article_comments", { articleId });
+  createCollectionTask("comments", {ids:[articleId]}, true);
 
 export const importRenderedComments = (articleId: number) =>
   invoke<number>("workbench_import_rendered_comments", { articleId });
@@ -153,4 +155,9 @@ export const importRenderedComments = (articleId: number) =>
 export type ArticleCollection = "interactions" | "comments";
 
 export const fetchArticleInteractions = (articleId: number) =>
-  invoke<void>("workbench_fetch_article_interactions", { articleId });
+  createCollectionTask("interactions", {ids:[articleId]}, true);
+
+export interface CollectionReceipt { task_id: number | null; requested: number; queued: number; skipped: number; already_queued: number }
+export type CollectionTarget = {biz:string} | {ids:number[]};
+export const createCollectionTask = (kind: ArticleCollection, target: CollectionTarget, refresh: boolean) => invoke<CollectionReceipt>("workbench_collection_create", {kind, refresh, biz: "biz" in target ? target.biz : null, articleIds: "ids" in target ? target.ids : null});
+export const articleCollectionTask = (articleId: number, kind: ArticleCollection) => invoke<Task | null>("workbench_article_collection_task", {articleId,kind});

@@ -7,7 +7,10 @@ use super::{
 use crate::{model::ArticleRow, Store};
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Collection {
@@ -216,7 +219,20 @@ pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> R
     }
     let mut metrics = ArticleInteractions::default();
     let comment_id = comment_id.context("原文没有可读取的留言标识")?;
-    // The upstream buffer is session-bound: retries restart the listing and merge by ID.
+    // Compare list metadata each time; cached replies avoid downloading complete threads again.
+    let mut cached = HashMap::new();
+    let mut local_cursor = None;
+    loop {
+        let page = store.article_comments_page(id, local_cursor, 50)?;
+        for mut row in page.items {
+            clear_rendered(&mut row);
+            cached.insert(row.id.clone(), row);
+        }
+        local_cursor = page.next_cursor;
+        if local_cursor.is_none() {
+            break;
+        }
+    }
     store.resume_or_refresh_comments(id)?;
     let previous = store.article_comment_position(id)?;
     let mut offset = 0usize;
@@ -250,6 +266,7 @@ pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> R
             .context("微信返回的留言列表格式无法识别")?;
         let mut rows = Vec::new();
         let mut fresh = 0;
+        let (mut added, mut updated, mut unchanged) = (0, 0, 0);
         for value in raw {
             let Some(mut row) = comments::parse_comment(value, 0) else {
                 store.save_article_interactions_and_comments(id, &metrics, &rows)?;
@@ -258,8 +275,14 @@ pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> R
             if seen.insert(row.id.clone()) {
                 fresh += 1;
             }
+            let prior = cached.get(&row.id);
+            let changed_replies = prior.is_some_and(|old| {
+                old.reply_total != row.reply_total || old.reply_max_id != row.reply_max_id
+            });
+            super::collection::merge_cached(&mut row, prior);
             if let Err(e) = replies(
                 ReplyRequest {
+                    changed_replies,
                     store,
                     client: &client,
                     session: &session,
@@ -277,9 +300,22 @@ pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> R
                 store.save_article_interactions_and_comments(id, &metrics, &rows)?;
                 return Err(e);
             }
-            rows.push(row);
+            match cached.get(&row.id) {
+                Some(previous) if previous == &row => {
+                    unchanged += 1;
+                }
+                previous => {
+                    if previous.is_some() {
+                        updated += 1;
+                    } else {
+                        added += 1;
+                    }
+                    rows.push(row);
+                }
+            }
         }
         store.save_article_interactions_and_comments(id, &metrics, &rows)?;
+        super::collection::page(store, false, added, updated, unchanged)?;
         let more = payload
             .get("continue_flag")
             .and_then(Value::as_bool)
@@ -298,13 +334,21 @@ pub(super) async fn collect(store: &Store, id: i64, collection: Collection) -> R
             !raw.is_empty() && fresh > 0,
             "微信留言分页未推进，已保留已采集结果"
         );
-        offset = offset.checked_add(LIMIT).context("留言分页超出范围")?;
+        offset = offset.checked_add(raw.len()).context("留言分页超出范围")?;
         cursor = buffer(&payload)?;
     }
     anyhow::bail!("本次留言采集达到分页上限，已保留已采集结果")
 }
 
+fn clear_rendered(row: &mut ArticleComment) {
+    row.content_parts.clear();
+    for reply in &mut row.replies {
+        clear_rendered(reply);
+    }
+}
+
 struct ReplyRequest<'a> {
+    changed_replies: bool,
     store: &'a Store,
     client: &'a reqwest::Client,
     session: &'a article_session::Session,
@@ -313,8 +357,17 @@ struct ReplyRequest<'a> {
     comment_id: &'a str,
     budget: &'a mut usize,
 }
+fn reply_snapshot_complete(row: &ArticleComment, reply: &Value, changed: bool) -> bool {
+    let total = reply.get("reply_total_cnt").and_then(number).unwrap_or(0) as usize;
+    let preloaded = reply
+        .get("reply_list")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    preloaded >= total || (row.replies.len() >= total && !changed)
+}
 async fn replies(request: ReplyRequest<'_>, raw: &Value, row: &mut ArticleComment) -> Result<()> {
     let ReplyRequest {
+        changed_replies,
         store,
         client,
         session,
@@ -327,13 +380,17 @@ async fn replies(request: ReplyRequest<'_>, raw: &Value, row: &mut ArticleCommen
         return Ok(());
     };
     let total = reply.get("reply_total_cnt").and_then(number).unwrap_or(0) as usize;
-    if row.replies.len() >= total {
+    if reply_snapshot_complete(row, reply, changed_replies) {
         return Ok(());
     }
+    // An unfinished reply snapshot cannot certify completeness on the next refresh.
+    let expected_total = row.reply_total.take();
+    let expected_max = row.reply_max_id.take();
     let root_id = raw.get("id").and_then(text).context("留言回复缺少根标识")?;
     let mut offset = 0usize;
     let mut cursor = String::new();
     let mut max_id = reply.get("max_reply_id").and_then(text).unwrap_or_default();
+    let mut seen_pages = HashSet::new();
     let filter = row
         .replies
         .iter()
@@ -367,22 +424,35 @@ async fn replies(request: ReplyRequest<'_>, raw: &Value, row: &mut ArticleCommen
             .pointer("/reply_list/reply_list")
             .and_then(Value::as_array)
             .context("回复列表不完整，已保留已采集结果")?;
-        let before = row.replies.len();
+        let returned = list.len();
+        let mut returned_ids = Vec::new();
         for value in list {
             let r = comments::parse_comment(value, 1).context("微信返回了无法识别的回复")?;
+            returned_ids.push(r.id.clone());
             comments::merge_comments(&mut row.replies, [r]);
         }
-        let fresh = row.replies.len() - before;
+        let advancing = !returned_ids.is_empty() && seen_pages.insert(returned_ids);
         let more = v
             .get("continue_flag")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if row.replies.len() >= total {
+        let complete = (!changed_replies || !more) && row.replies.len() >= total;
+        if complete {
+            row.reply_total = expected_total;
+            row.reply_max_id = expected_max.clone();
+        }
+        store.save_article_interactions_and_comments(
+            article.id,
+            &Default::default(),
+            std::slice::from_ref(row),
+        )?;
+        super::collection::page(store, true, 0, 0, 0)?;
+        if complete {
             return Ok(());
         }
         ensure!(more, "回复尚未补齐，已保留已采集结果，请刷新原文后重试");
-        ensure!(fresh > 0, "回复分页未推进，已保留已采集结果");
-        offset += fresh;
+        ensure!(advancing, "回复分页未推进，已保留已采集结果");
+        offset += returned;
         cursor = buffer(&v)?;
         max_id = v
             .pointer("/reply_list/max_reply_id")
@@ -396,6 +466,18 @@ async fn replies(request: ReplyRequest<'_>, raw: &Value, row: &mut ArticleCommen
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn complete_cached_replies_are_reused_but_changed_snapshots_are_checked() {
+        let raw = json!({"content_id":"root","content":"主留言","reply_new":{"reply_total_cnt":3,"max_reply_id":"3","reply_list":[{"reply_id":"1","content":"一"},{"reply_id":"2","content":"二"},{"reply_id":"3","content":"三"}]}});
+        let cached = comments::parse_comment(&raw, 0).unwrap();
+        let brief = json!({"reply_total_cnt":3,"reply_list":[{"reply_id":"3","content":"三"}]});
+        assert!(reply_snapshot_complete(&cached, &brief, false));
+        // Equal counts can still hide a new reply replacing a deleted one.
+        assert!(!reply_snapshot_complete(&cached, &brief, true));
+        assert!(reply_snapshot_complete(&cached, &raw["reply_new"], true));
+        let missing = json!({"reply_total_cnt":4,"reply_list":[]});
+        assert!(!reply_snapshot_complete(&cached, &missing, false));
+    }
     #[test]
     fn capped_read_count_is_not_an_exact_number() {
         let m=stats(&json!({"appmsgstat":{"ret":0,"is_login":true,"read_num":100001,"old_like_num":42,"like_num":7},"comment_count":52})).unwrap();

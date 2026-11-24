@@ -35,3 +35,13 @@ test("整号仅在全部非空正文齐备时允许导出；缺正文提供下�
   for (const count of [undefined, -1, 11, NaN, 1.5]) assert.equal(sourceBodyAction(10, count), null);
   assert.equal(sourceBodyAction(0, 0), null);
 });
+
+test("互动与评论任务沿用暂停、继续和取消，缺少文章令牌不进入主页恢复流程", () => {
+  for(const kind of ["interactions","comments"] as const) {
+    assert.equal(taskPrimaryAction(task({kind,state:"running"})),"pause");
+    assert.equal(taskPrimaryAction(task({kind,state:"paused"})),"resume");
+    assert.equal(taskPrimaryAction(task({kind,state:"needs_action",reason:"微信未提供文章访问令牌，请打开对应公众号文章后重试"})),"resume");
+    assert.equal(canCancelTask(task({kind,state:"running"})),true);
+    assert.equal(canCancelTask(task({kind,state:"cancelled"})),false);
+  }
+});

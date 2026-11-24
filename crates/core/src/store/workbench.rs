@@ -11,6 +11,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+pub(crate) mod collection;
+pub use collection::{CollectionReceipt, CollectionStatus};
 mod home_sync;
 mod pagination;
 mod request_slots;
@@ -23,6 +25,7 @@ CREATE TABLE IF NOT EXISTS wb_sources(biz TEXT PRIMARY KEY,document TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS wb_sessions(id TEXT PRIMARY KEY,biz TEXT NOT NULL,path TEXT NOT NULL,config TEXT NOT NULL,created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_cursors(id INTEGER PRIMARY KEY,biz TEXT NOT NULL,session_id TEXT NOT NULL,parent_id INTEGER,hash TEXT NOT NULL,evidence_path TEXT NOT NULL,observed_at REAL NOT NULL,last_success_at REAL,state TEXT NOT NULL DEFAULT 'unverified',UNIQUE(biz,session_id,hash));
 CREATE TABLE IF NOT EXISTS wb_coverage(biz TEXT NOT NULL,mid TEXT NOT NULL,idx INTEGER NOT NULL,PRIMARY KEY(biz,mid,idx));
+CREATE TABLE IF NOT EXISTS wb_article_collection(article_id INTEGER PRIMARY KEY,interactions_at REAL);
 CREATE TABLE IF NOT EXISTS wb_tasks(id INTEGER PRIMARY KEY,document TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS wb_task_state ON wb_tasks(json_extract(document,'$.state'),json_extract(document,'$.kind'));
 CREATE TABLE IF NOT EXISTS wb_experiments(id INTEGER PRIMARY KEY,document TEXT NOT NULL);
@@ -1020,6 +1023,12 @@ impl Store {
                 );
             }
         }
+        if crate::workbench::collection::is_collection(&task.kind) {
+            task.progress
+                .collection
+                .get_or_insert_with(Default::default)
+                .epoch += 1;
+        }
         task.state = state.into();
         if let Some(recovery) = &mut task.progress.session_recovery {
             recovery.phase = if state == "queued" {
@@ -1583,6 +1592,9 @@ impl Store {
         );
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if category == "interaction" {
+            collection::guard(&tx, owner)?;
+        }
         let p: Policy = tx
             .query_row("SELECT document FROM wb_policy WHERE id=1", [], |r| {
                 decode(r, 0)

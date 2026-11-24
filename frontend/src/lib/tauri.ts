@@ -173,6 +173,7 @@ export interface ArticleInteractions {
 }
 
 export interface ArticleItem {
+  collection: { interactions: boolean; comments: boolean; comments_complete: boolean };
   is_deleted: boolean;
   interactions: ArticleInteractions;
   has_body: boolean;

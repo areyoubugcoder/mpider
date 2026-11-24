@@ -2,6 +2,7 @@
 pub mod archive;
 mod article_session;
 mod authenticated_comments;
+pub mod collection;
 pub mod comments;
 pub mod discovery;
 pub mod engine;
@@ -201,6 +202,7 @@ pub struct CursorRecord {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TaskProgress {
+    pub collection: Option<collection::Progress>,
     /// 已被服务端拒绝的会话版本；恢复前必须实际保存不同版本的会话。
     pub blocked_session_id: Option<String>,
     pub session_recovery: Option<SessionRecovery>,

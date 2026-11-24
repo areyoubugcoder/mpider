@@ -6,17 +6,18 @@ import { canCancelTask, taskPrimaryAction } from "@/lib/action-visibility";
 import { recoverSession, taskAction, type Source, type Task } from "@/lib/workbench";
 
 type Run = (action: () => Promise<unknown>, message?: string) => Promise<void>;
-export function TaskPrimaryAction({ task, source, busy, run, labels = {}, onRetry }: {
+export function TaskPrimaryAction({ task, source, busy, run, labels = {}, onRetry, menu = false }: {
   task: Task; source?: Source; busy: boolean; run: Run;
   labels?: Partial<Record<"pause" | "resume" | "recover" | "stop_recovery", string>>;
-  onRetry?: () => Promise<unknown>;
+  onRetry?: () => Promise<unknown>; menu?: boolean;
 }) {
   const action = taskPrimaryAction(task, source);
   if (!action || (action === "retry_download" && !onRetry)) return null;
   const label = action === "retry_download" ? "重试未完成下载" : labels[action] || {
     pause: "暂停", resume: task.state === "failed" ? "重试" : "继续", recover: "更新会话并继续", stop_recovery: "取消自动继续",
   }[action];
-  return <TextAction disabled={busy} onClick={() => { void run(() => action === "recover" ? recoverSession(task.id) : action === "retry_download" ? onRetry!() : taskAction(task.id, action === "resume" ? "resume" : "pause")); }}>{label}</TextAction>;
+  const perform = () => { void run(() => action === "recover" ? recoverSession(task.id) : action === "retry_download" ? onRetry!() : taskAction(task.id, action === "resume" ? "resume" : "pause")); };
+  return menu ? <DropdownMenuItem disabled={busy} onSelect={perform}>{label}</DropdownMenuItem> : <TextAction disabled={busy} onClick={perform}>{label}</TextAction>;
 }
 
 export function TaskMoreActions({ tasks, busy, run, children }: { tasks: { task?: Task | null; label: string }[]; busy: boolean; run: Run; children?: ReactNode }) {

@@ -26,6 +26,7 @@ mod native;
 mod push_monitor;
 pub mod system_logs;
 mod workbench;
+pub use workbench::{CollectionReceipt, CollectionStatus};
 
 /// Article-library visibility affects reads only; collection selections exclude deleted rows.
 #[derive(Clone, Copy, Default)]
@@ -2365,6 +2366,7 @@ impl Store {
         use crate::workbench::comments::{merge_comments, ArticleComment};
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        workbench::collection::guard(&tx, id)?;
         let updated = tx.execute(
             "UPDATE articles SET read_num=CASE WHEN ?6 IS NOT NULL THEN NULL ELSE COALESCE(?1,read_num) END, old_like_num=COALESCE(?2,old_like_num),
              like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count),
@@ -2434,10 +2436,11 @@ impl Store {
     }
 
     pub fn resume_or_refresh_comments(&self, id: i64) -> Result<()> {
-        self.conn().execute(
-            "UPDATE articles SET comment_next_offset=0 WHERE id=? AND is_deleted=0 AND comment_next_offset<0",
-            [id],
-        )?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        workbench::collection::guard(&tx, id)?;
+        tx.execute("UPDATE articles SET comment_next_offset=0 WHERE id=? AND is_deleted=0 AND comment_next_offset<0",[id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -2496,6 +2499,8 @@ impl Store {
                     Ok((
                         row_id,
                         ArticleComment {
+                            reply_total: saved.as_ref().and_then(|s| s.reply_total),
+                            reply_max_id: saved.as_ref().and_then(|s| s.reply_max_id.clone()),
                             content_parts: Vec::new(),
                             id: row
                                 .get::<_, Option<String>>(1)?

@@ -20,6 +20,10 @@ pub struct ArticleComment {
     pub reply_to: Option<String>,
     #[serde(default)]
     pub replies: Vec<ArticleComment>,
+    #[serde(default)]
+    pub reply_total: Option<i64>,
+    #[serde(default)]
+    pub reply_max_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -195,11 +199,12 @@ pub(crate) fn merge_comments(
                     prior.images.push(image);
                 }
             }
+            prior.content = row.content;
             prior.likes = row.likes.or(prior.likes);
             prior.created_at = prior.created_at.or(row.created_at);
             prior.reply_to = prior.reply_to.take().or(row.reply_to);
             prior.is_author |= row.is_author;
-            if prior.author.is_empty() {
+            if !row.author.is_empty() {
                 prior.author = row.author;
             }
         } else {
@@ -303,6 +308,14 @@ pub(super) fn parse_comment(value: &Value, depth: u8) -> Option<ArticleComment> 
             "to_nick_name",
         ]),
         replies,
+        reply_total: value
+            .pointer("/reply_new/reply_total_cnt")
+            .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok())),
+        reply_max_id: value.pointer("/reply_new/max_reply_id").and_then(|v| {
+            v.as_str()
+                .map(str::to_owned)
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+        }),
     })
 }
 
