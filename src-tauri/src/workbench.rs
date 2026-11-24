@@ -75,85 +75,25 @@ pub fn workbench_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String
     state.store.wb_snapshot().map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub async fn workbench_collect_interactions(
-    app: tauri::AppHandle,
+pub fn workbench_article_comments(
     state: State<'_, AppState>,
     article_id: i64,
-    on_ready: tauri::ipc::Channel<()>,
-) -> Result<core::interactions::ArticleInteractions, String> {
-    #[cfg(windows)]
-    {
-        let store = state.store.clone();
-        let ca = tauri::async_runtime::spawn_blocking(move || {
-            let (cert, key) = ca_paths(&app)?;
-            if !cert.is_file() || !key.is_file() || !keychain_has_cert() {
-                return Err("互动补采需要已受信任的 MPider 证书。请先在补采对话框安装".to_string());
-            }
-            Ok::<_, String>(CaMaterial::from_pem(
-                std::fs::read_to_string(cert).map_err(|e| e.to_string())?,
-                std::fs::read_to_string(key).map_err(|e| e.to_string())?,
-            ))
-        })
-        .await
-        .map_err(|e| e.to_string())??;
-        core::interactions::collect(&store, article_id, ca, interaction_proxy, || {
-            let _ = on_ready.send(());
-        })
-        .await
-        .map_err(|e| format!("{e:#}"))
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (app, state, article_id, on_ready);
-        Err("互动补采需要 Windows 桌面微信".into())
-    }
+    after: Option<i64>,
+) -> Result<core::comments::ArticleCommentsPage, String> {
+    state
+        .store
+        .article_comments_page(article_id, after, 20)
+        .map_err(|e| e.to_string())
 }
 
-#[cfg(windows)]
-fn interaction_proxy(
-    port: u16,
-) -> Result<mpider_core::sysproxy::SystemProxyGuard<mpider_core::sysproxy::WinInetApplier>, String>
-{
-    use mpider_core::sysproxy::{win_commands, ProxyApplier, SystemProxyGuard, WinInetApplier};
-    const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
-    let (active, previous_endpoint) = read_system_proxy_windows();
-    if active {
-        return Err("检测到已启用的系统代理，请先关闭代理再补采互动".into());
-    }
-
-    let host = "127.0.0.1";
-    let mut restore = win_commands(false, host, port);
-    restore.push(if let Some(endpoint) = previous_endpoint {
-        [
-            "reg",
-            "add",
-            KEY,
-            "/v",
-            "ProxyServer",
-            "/t",
-            "REG_SZ",
-            "/d",
-            &endpoint,
-            "/f",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect()
-    } else {
-        ["reg", "delete", KEY, "/v", "ProxyServer", "/f"]
-            .into_iter()
-            .map(str::to_string)
-            .collect()
-    });
-    let guard = SystemProxyGuard::set(
-        WinInetApplier,
-        win_commands(true, host, port),
-        restore.clone(),
-    );
-    if guard.is_err() {
-        let _ = WinInetApplier.apply(&restore);
-    }
-    guard.map_err(|error| error.to_string())
+#[tauri::command]
+pub async fn workbench_fetch_article_comments(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<(), String> {
+    core::comments::fetch_page(&state.store, article_id)
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]

@@ -119,8 +119,27 @@ export const exportExperiment = (id: number) => invoke<{ path: string; count: nu
 
 export const articleBodyStates = (articleIds: number[]) => invoke<Record<number,boolean>>("workbench_article_body_states", { articleIds });
 
-export async function collectArticleInteractions(articleId: number, onReady: () => void) {
-  const ready = new Channel<null>();
-  ready.onmessage = onReady;
-  return invoke<import("./tauri").ArticleInteractions>("workbench_collect_interactions", { articleId, onReady: ready });
+export interface ArticleComment {
+  id: string;
+  author: string;
+  content: string;
+  likes: number | null;
+  created_at: number | null;
+  is_author: boolean;
+  reply_to: string | null;
+  replies: ArticleComment[];
 }
+
+export interface ArticleCommentsPage {
+  items: ArticleComment[];
+  next_cursor: number | null;
+  cached_count: number;
+  comment_count: number | null;
+  can_fetch_more: boolean;
+}
+
+export const articleComments = (articleId: number, after: number | null) =>
+  invoke<ArticleCommentsPage>("workbench_article_comments", { articleId, after });
+
+export const fetchArticleComments = (articleId: number) =>
+  invoke<void>("workbench_fetch_article_comments", { articleId });

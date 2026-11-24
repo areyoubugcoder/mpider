@@ -18,18 +18,19 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { Switch } from "@/components/ui/switch";
 import { TaskTabs } from "@/components/TaskTabs";
 import { TextAction } from "@/components/TextAction";
+import { ArticleComments } from "./ArticleComments";
 import { HomeMonitoringCard } from "@/components/HomeSync";
 import { TaskMoreActions, TaskPrimaryAction } from "@/components/TaskRowActions";
 import { canCancelTask, sourceBodyAction } from "@/lib/action-visibility";
 import { relativeTime } from "@/lib/relative-time";
 import { recoveryIsWaiting, recoveryMessage } from "@/lib/home-sync";
 import { Popover, PopoverTrigger, PopoverContent, PopoverClose } from "@/components/ui/popover";
-import { certStatus, installCert, coreHealth, nativeEnvironment, getArticleDetail, openExternal, listArticles, articleSelectionIds, listAccounts, revealInFolder, listLogs, sysproxyResetStale, DEFAULT_CFG } from "@/lib/tauri";
-import { collectArticleInteractions, logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage, requestPage, downloadArticles, exportArticles, deleteArticles, deleteSource, downloadSourceBodies, exportSourceArticles, syncSourceHome, createHistory, readArchive, savePolicy, exportRequests, pythonPath, type Policy, type Task, type DownloadReceipt, type MarkdownExport } from "@/lib/workbench";
+import { coreHealth, nativeEnvironment, getArticleDetail, openExternal, listArticles, articleSelectionIds, listAccounts, revealInFolder, listLogs, sysproxyResetStale, DEFAULT_CFG } from "@/lib/tauri";
+import { logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage, requestPage, downloadArticles, exportArticles, deleteArticles, deleteSource, downloadSourceBodies, exportSourceArticles, syncSourceHome, createHistory, readArchive, savePolicy, exportRequests, pythonPath, type Policy, type Task, type DownloadReceipt, type MarkdownExport } from "@/lib/workbench";
 
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 const names: Record<string, string> = {
-  redirect: "文章链接跳转",
+  redirect: "文章链接跳转", article_comments: "文章留言",
   push_metadata: "推送文章解析", invalid_metadata: "文章信息不完整", rate_limited: "请求受限",
   starting: "正在准备", stopping: "正在停止", stopped: "已停止", observed: "已观察", observed_home: "用户原生列表",
   recovering: "正在恢复", queued: "排队中", running: "运行中", paused: "已暂停", needs_action: "待人工处理", done: "已结束", cancelled: "已取消", failed: "失败",
@@ -169,12 +170,7 @@ function showExportResult(result: MarkdownExport | null) {
 }
 export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz:string)=>void}) {
   const snapshot = useSnapshot(); const { busy, run } = useAction();
-  const health = useQuery({ queryKey: ["health"], queryFn: coreHealth });
-  const [interaction, setInteraction] = useState<{ id: number; url: string; title: string } | null>(null);
-  const interactionCert = useQuery({ queryKey: ["interaction-certificate"], queryFn: certStatus, enabled: interaction !== null });
-  const canCollectInteraction = interactionCert.data?.installed && interactionCert.data.ca_exists;
-  const [interactionReady, setInteractionReady] = useState(false);
-  const [collectingInteraction, setCollectingInteraction] = useState(false);
+  const [commentArticle, setCommentArticle] = useState<{ id: number; title: string; count: number | null } | null>(null);
   const [page, setPage] = useState(0); const [pageSize,setPageSize]=useState(DEFAULT_PAGE_SIZE); const [selected, setSelected] = useState<number[]>([]);
   const [deleting, setDeleting] = useState<number[] | null>(null);
   const [reader, setReader] = useState<{ title: string; html?: string; markdown?: string } | null>(null);
@@ -211,58 +207,22 @@ export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz
     <Card><CardContent className="pt-4"><Table><TableHeader><TableRow><TableHead><Check name="选择本页全部文章" checked={!!rows.length && rows.every(a => selected.includes(a.id))} onChange={() => setSelected(old => rows.every(a => old.includes(a.id)) ? old.filter(id => !rows.some(a => a.id === id)) : Array.from(new Set([...old, ...rows.map(a => a.id)])))} /></TableHead>{["文章", "发布时间", "互动", "操作"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(a => <TableRow key={a.id}>
       <TableCell><Check name={`选择文章${a.title || a.id}`} checked={selected.includes(a.id)} onChange={() => setSelected(old => toggle(old, a.id))} /></TableCell><TableCell className="max-w-xl"><p className="font-medium">{a.title || "无标题"}</p><p className="mt-1 text-xs text-muted-foreground">{a.account || a.author || ""}</p></TableCell><TableCell className="whitespace-nowrap text-xs">{dt(a.published_at)}</TableCell>
       <TableCell className="text-xs">
-        {Object.values(a.interactions).every(value => value == null)
-          ? <span className="text-muted-foreground">待补采</span>
-          : <div className="grid grid-cols-2 gap-x-3 gap-y-1 whitespace-nowrap">
-              <span>阅读 {a.interactions.read_count ?? "—"}</span>
-              <span>点赞 {a.interactions.like_count ?? "—"}</span>
-              <span>在看 {a.interactions.watching_count ?? "—"}</span>
-              <span>评论 {a.interactions.comment_count ?? "—"}</span>
-            </div>}
+        <div className="grid grid-cols-2 items-center gap-x-3 gap-y-1 whitespace-nowrap">
+          <span>阅读 {a.interactions.read_count ?? "—"}</span>
+          <span>点赞 {a.interactions.like_count ?? "—"}</span>
+          <span>在看 {a.interactions.watching_count ?? "—"}</span>
+          <button type="button" className="w-fit rounded-sm text-left text-link hover:underline"
+            onClick={() => setCommentArticle({ id: a.id, title: a.title || "无标题", count: a.interactions.comment_count })}>
+            {a.interactions.comment_count == null ? "查看留言" : `评论 ${a.interactions.comment_count}`}
+          </button>
+        </div>
       </TableCell><TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {a.has_body ? <><TextAction disabled={busy} onClick={() => run(() => read(a.id))}>阅读</TextAction><TextAction disabled={busy} onClick={() => run(async () => showExportResult(await exportArticles([a.id])))}>导出</TextAction></> : <TextAction disabled={busy} onClick={() => run(async () => showDownloadReceipt(await downloadArticles([a.id])))}>下载</TextAction>}
-        {health.data?.platform === "windows" && a.content_url && <TextAction disabled={busy} onClick={() => {
-          setInteractionReady(false);
-          setInteraction({ id: a.id, url: a.content_url!, title: a.title || "无标题" });
-        }}>补采互动</TextAction>}
         {a.content_url && <TextAction disabled={busy} onClick={() => run(() => openExternal(a.content_url!))}>查看原文</TextAction>}
       </div></TableCell>
     </TableRow>)}</TableBody></Table>{!rows.length && <Empty>{articles.isPending ? "正在读取文章…" : "尚无文章。请先获取公众号第一页。"}</Empty>}
     <Pager label="文章库" page={page} total={total} pageSize={pageSize} busy={articles.isFetching} unit="篇" onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} /></CardContent></Card>
-    <Dialog open={!!interaction} onOpenChange={open => { if (!open && !collectingInteraction) setInteraction(null); }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>补采互动 · {interaction?.title}</DialogTitle>
-          <DialogDescription>准备文章链接。开始后，请在 60 秒内用桌面微信打开或刷新这篇文章。</DialogDescription>
-        </DialogHeader>
-        <Input aria-label="原文链接" value={interaction?.url ?? ""} readOnly onFocus={event => event.currentTarget.select()} />
-        <p role="status" className="text-sm text-muted-foreground">
-          {interactionReady ? "正在等候微信返回阅读、点赞、在看和评论数。" : collectingInteraction ? "正在准备监听…" : "此功能临时使用 MPider 本地代理。首次使用时需要安装并信任 MPider 证书。"}
-        </p>
-        <div className="flex justify-end gap-2">
-          {interactionCert.isError && <Button variant="outline" disabled={interactionCert.isFetching} onClick={() => void interactionCert.refetch()}>重新检查证书</Button>}
-          {!canCollectInteraction && interactionCert.isSuccess && <Button variant="outline" disabled={busy} onClick={() => void run(async () => {
-            const result = await installCert();
-            if (!result.ok || !result.installed) throw new Error("MPider 证书安装失败，请查看系统提示后重试");
-          }, "已安装 MPider 证书")}>安装 MPider 证书</Button>}
-          <Button variant="outline" disabled={busy} onClick={() => setInteraction(null)}>关闭</Button>
-          <Button disabled={busy || !interaction || !canCollectInteraction} onClick={() => {
-            if (!interaction) return;
-            const { id } = interaction;
-            setCollectingInteraction(true);
-            setInteractionReady(false);
-            void run(async () => {
-              const metrics = await collectArticleInteractions(id, () => setInteractionReady(true));
-              setInteraction(null);
-              toast.success(metrics.comment_count == null ? "已更新互动，微信未返回评论数" : `已更新互动 · 评论 ${metrics.comment_count}`);
-            }).finally(() => {
-              setCollectingInteraction(false);
-              setInteractionReady(false);
-            });
-          }}>开始补采</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    {commentArticle && <ArticleComments key={commentArticle.id} article={commentArticle} onClose={() => setCommentArticle(null)} />}
     <Dialog open={!!reader} onOpenChange={open => { if (!open) setReader(null); }}><DialogContent className="flex h-[85vh] max-w-4xl flex-col"><DialogHeader><DialogTitle>{reader?.title}</DialogTitle><DialogDescription>阅读本地正文；未保存的远程图片不会自动加载。</DialogDescription></DialogHeader>{reader?.html ? <iframe title="文章阅读" className="min-h-0 flex-1 rounded-lg border bg-white" sandbox="" srcDoc={reader.html} /> : <div className="prose min-h-0 max-w-none flex-1 overflow-auto dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => <span className="text-sm text-muted-foreground">［图片未保存］</span>, a: ({ href, children }) => <button className="text-link underline" onClick={() => { if (href && /^https?:\/\//.test(href)) void openExternal(href).catch(e => toast.error(String(e))); }}>{children}</button> }}>{reader?.markdown}</ReactMarkdown></div>}</DialogContent></Dialog>
     <Dialog open={!!deleting} onOpenChange={open => { if (!open && !busy) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>删除所选 {deleting?.length ?? 0} 篇文章</DialogTitle><DialogDescription>文章将从文章库及后续整号下载、导出中移除。已有文件和任务记录保留。未结束下载任务中的文章需先取消相关任务。</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setDeleting(null)}>取消</Button><Button variant="destructive" disabled={busy} onClick={() => run(async () => { const removed = await deleteArticles(deleting!); setSelected(old => old.filter(id => !deleting!.includes(id))); setDeleting(null); toast.success(`已删除 ${removed} 篇文章`); })}>确认删除</Button></div></DialogContent></Dialog>
   </Page>;

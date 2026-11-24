@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS articles (
     old_like_num INTEGER,
     like_num     INTEGER,
     comment_count INTEGER,
+    comment_next_offset INTEGER NOT NULL DEFAULT 0,
     is_deleted   INTEGER NOT NULL DEFAULT 0,
     detail_done  INTEGER NOT NULL DEFAULT 0,
     detail_attempts INTEGER NOT NULL DEFAULT 0,
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at   REAL,
     UNIQUE (article_id, content_id)
 );
+CREATE INDEX IF NOT EXISTS idx_comments_article_page ON comments(article_id, id);
 
 CREATE TABLE IF NOT EXISTS tasks (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -404,6 +406,7 @@ impl Store {
             "ALTER TABLE accounts ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_attempts INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_error TEXT",
+            "ALTER TABLE articles ADD COLUMN comment_next_offset INTEGER NOT NULL DEFAULT 0",
             // 凭证热数据列（有效期 / 失效 / 使用统计）
             "ALTER TABLE credentials ADD COLUMN expires_at REAL",
             "ALTER TABLE credentials ADD COLUMN invalidated_at REAL",
@@ -2320,14 +2323,165 @@ impl Store {
         id: i64,
         metrics: &crate::workbench::interactions::ArticleInteractions,
     ) -> Result<()> {
-        let updated = self.conn().execute(
+        self.save_article_interactions_and_comments(id, metrics, &[])
+    }
+
+    pub fn save_article_interactions_and_comments(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+        comments: &[crate::workbench::comments::ArticleComment],
+    ) -> Result<()> {
+        self.save_article_comment_batch(id, metrics, comments, None)
+    }
+
+    pub fn save_article_comment_batch(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+        comments: &[crate::workbench::comments::ArticleComment],
+        cursor: Option<(i64, i64)>,
+    ) -> Result<()> {
+        use crate::workbench::comments::{merge_comments, ArticleComment};
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let updated = tx.execute(
             "UPDATE articles SET read_num=COALESCE(?1,read_num), old_like_num=COALESCE(?2,old_like_num),
              like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count)
              WHERE id=?5 AND is_deleted=0",
             params![metrics.read_count, metrics.like_count, metrics.watching_count, metrics.comment_count, id],
         )?;
         anyhow::ensure!(updated == 1, "文章已删除");
+        if let Some((previous, next)) = cursor {
+            let changed = tx.execute(
+                "UPDATE articles SET comment_next_offset=?1 WHERE id=?2 AND comment_next_offset=?3",
+                params![next, id, previous],
+            )?;
+            anyhow::ensure!(changed == 1, "留言分页已更新，请重新加载");
+        }
+
+        for comment in comments {
+            let previous: Option<String> = tx
+                .query_row(
+                    "SELECT reply_json FROM comments WHERE article_id=?1 AND content_id=?2",
+                    params![id, comment.id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            let mut replies: Vec<ArticleComment> = previous
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<ArticleComment>(json)
+                        .ok()
+                        .map(|row| row.replies)
+                        .or_else(|| serde_json::from_str(json).ok())
+                })
+                .unwrap_or_default();
+            merge_comments(&mut replies, comment.replies.iter().cloned());
+            let thread = ArticleComment {
+                replies,
+                ..comment.clone()
+            };
+            tx.execute(
+                "INSERT INTO comments(article_id,content_id,nick_name,content,like_num,reply_json,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(article_id,content_id) DO UPDATE SET
+                    nick_name=COALESCE(NULLIF(excluded.nick_name,''),comments.nick_name), content=excluded.content,
+                    like_num=COALESCE(excluded.like_num,comments.like_num),
+                    reply_json=excluded.reply_json, created_at=COALESCE(excluded.created_at,comments.created_at)",
+                params![id, thread.id, thread.author, thread.content, thread.likes,
+                    serde_json::to_string(&thread)?, thread.created_at],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+
+    pub fn article_comment_position(&self, article_id: i64) -> Result<i64> {
+        self.conn()
+            .query_row(
+                "SELECT comment_next_offset FROM articles WHERE id=? AND is_deleted=0",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn article_comments_page(
+        &self,
+        article_id: i64,
+        after: Option<i64>,
+        limit: usize,
+    ) -> Result<crate::workbench::comments::ArticleCommentsPage> {
+        use crate::workbench::comments::{ArticleComment, ArticleCommentsPage};
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let (comment_count, can_fetch_more) = tx
+            .query_row(
+                "SELECT comment_count, comment_next_offset>=0 AND COALESCE(content_url,'')<>''
+                 FROM articles WHERE id=? AND is_deleted=0",
+                params![article_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| anyhow::anyhow!("文章不存在或已删除"))?;
+        let cached_count = tx.query_row(
+            "SELECT COUNT(*) FROM comments WHERE article_id=?",
+            params![article_id],
+            |row| row.get(0),
+        )?;
+        let limit = limit.clamp(1, 50);
+        let (items, next_cursor) = {
+            let mut stmt = tx.prepare(
+                "SELECT id,content_id,nick_name,content,like_num,reply_json,CAST(created_at AS INTEGER)
+                 FROM comments WHERE article_id=?1 AND id>?2 ORDER BY id LIMIT ?3",
+            )?;
+            let mut page = stmt
+                .query_map(params![article_id, after.unwrap_or(0), limit + 1], |row| {
+                    let row_id: i64 = row.get(0)?;
+                    let document: Option<String> = row.get(5)?;
+                    let saved: Option<ArticleComment> = document
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok());
+                    let legacy_replies = || {
+                        document
+                            .as_deref()
+                            .and_then(|json| serde_json::from_str(json).ok())
+                            .unwrap_or_default()
+                    };
+                    Ok((
+                        row_id,
+                        ArticleComment {
+                            id: row
+                                .get::<_, Option<String>>(1)?
+                                .unwrap_or_else(|| format!("local:{row_id}")),
+                            author: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            content: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            likes: row.get(4)?,
+                            created_at: row.get(6)?,
+                            is_author: saved.as_ref().is_some_and(|item| item.is_author),
+                            reply_to: saved.as_ref().and_then(|item| item.reply_to.clone()),
+                            replies: saved.map_or_else(legacy_replies, |item| item.replies),
+                        },
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let has_more = page.len() > limit;
+            page.truncate(limit);
+            let next_cursor = has_more.then(|| page.last().map(|(id, _)| *id)).flatten();
+            (
+                page.into_iter().map(|(_, item)| item).collect(),
+                next_cursor,
+            )
+        };
+        Ok(ArticleCommentsPage {
+            items,
+            next_cursor,
+            cached_count,
+            comment_count,
+            can_fetch_more,
+        })
     }
 
     /// 文章计数（控制面板状态卡用）：(总数, 已采详情数, 待补数)，均不含已删除。
