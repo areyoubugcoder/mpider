@@ -173,6 +173,12 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 - [ ] **任务体验**：优化批量操作、进度展示、失败重试与诊断信息。
 - [ ] **数据管理**：完善备份恢复、归档迁移和本地存储清理。
 
+## 打赏支持
+
+如果 MPider 对你有帮助，欢迎自愿打赏支持。
+
+<img src="docs/assets/wechat-donation.png" alt="微信赞赏码" width="240" />
+
 ## 开发与贡献
 
 开发需要 Node.js **24+**、**pnpm**、Rust（版本见 `rust-toolchain.toml`）；Windows 构建还需 Visual Studio C++ Build Tools 与 Windows SDK。改动在独立 Git worktree 中进行：
