@@ -2631,6 +2631,7 @@ pub fn run() {
             workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
             workbench::workbench_fetch_article_comments,
+            workbench::workbench_import_rendered_comments,
             workbench::workbench_article_comments,
             workbench::workbench_source_page,
             workbench::workbench_task_page,

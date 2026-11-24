@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS articles (
     old_like_num INTEGER,
     like_num     INTEGER,
     comment_count INTEGER,
+    interaction_share_count INTEGER,
+    interaction_read_display TEXT,
     comment_next_offset INTEGER NOT NULL DEFAULT 0,
     is_deleted   INTEGER NOT NULL DEFAULT 0,
     detail_done  INTEGER NOT NULL DEFAULT 0,
@@ -406,6 +408,8 @@ impl Store {
             "ALTER TABLE accounts ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_attempts INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_error TEXT",
+            "ALTER TABLE articles ADD COLUMN interaction_share_count INTEGER",
+            "ALTER TABLE articles ADD COLUMN interaction_read_display TEXT",
             "ALTER TABLE articles ADD COLUMN comment_next_offset INTEGER NOT NULL DEFAULT 0",
             // 凭证热数据列（有效期 / 失效 / 使用统计）
             "ALTER TABLE credentials ADD COLUMN expires_at REAL",
@@ -2110,7 +2114,7 @@ impl Store {
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count FROM articles WHERE is_deleted=0",
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE is_deleted=0",
         );
         let (filter, mut args) = Self::article_filter(biz, title, downloaded);
         sql.push_str(&filter);
@@ -2156,7 +2160,7 @@ impl Store {
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count FROM articles \
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles \
              WHERE is_deleted=0 AND detail_done=0 AND content_url IS NOT NULL AND content_url != ''",
         );
         let mut args: Vec<SqlValue> = Vec::new();
@@ -2279,7 +2283,7 @@ impl Store {
         let row = conn
             .query_row(
                 "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-                 published_at, detail_done, is_deleted, detail_error, content_md, read_num, old_like_num, like_num, comment_count FROM articles WHERE id=?",
+                 published_at, detail_done, is_deleted, detail_error, content_md, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE id=?",
                 params![id],
                 |r| {
                     Ok((
@@ -2315,6 +2319,8 @@ impl Store {
             like_count: row.get(14)?,
             watching_count: row.get(15)?,
             comment_count: row.get(16)?,
+            share_count: row.get(17)?,
+            read_display: row.get(18)?,
         })
     }
 
@@ -2347,9 +2353,12 @@ impl Store {
         let tx = conn.transaction()?;
         let updated = tx.execute(
             "UPDATE articles SET read_num=COALESCE(?1,read_num), old_like_num=COALESCE(?2,old_like_num),
-             like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count)
-             WHERE id=?5 AND is_deleted=0",
-            params![metrics.read_count, metrics.like_count, metrics.watching_count, metrics.comment_count, id],
+             like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count),
+             interaction_share_count=COALESCE(?5,interaction_share_count),
+             interaction_read_display=CASE WHEN ?1 IS NOT NULL THEN NULL
+                 ELSE COALESCE(?6,interaction_read_display) END
+             WHERE id=?7 AND is_deleted=0",
+            params![metrics.read_count, metrics.like_count, metrics.watching_count, metrics.comment_count, metrics.share_count, metrics.read_display, id],
         )?;
         anyhow::ensure!(updated == 1, "文章已删除");
         if let Some((previous, next)) = cursor {

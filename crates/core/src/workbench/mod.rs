@@ -7,6 +7,8 @@ mod export_html;
 pub mod interactions;
 pub mod markdown_export;
 pub mod push_monitor;
+#[cfg(any(windows, test))]
+pub mod rendered_comments;
 mod request;
 #[cfg(test)]
 mod tests;

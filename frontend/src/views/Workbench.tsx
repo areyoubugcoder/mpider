@@ -170,6 +170,7 @@ function showExportResult(result: MarkdownExport | null) {
 }
 export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz:string)=>void}) {
   const snapshot = useSnapshot(); const { busy, run } = useAction();
+  const clientHealth = useQuery({ queryKey: ["health"], queryFn: coreHealth });
   const [commentArticle, setCommentArticle] = useState<{ id: number; title: string; count: number | null } | null>(null);
   const [page, setPage] = useState(0); const [pageSize,setPageSize]=useState(DEFAULT_PAGE_SIZE); const [selected, setSelected] = useState<number[]>([]);
   const [deleting, setDeleting] = useState<number[] | null>(null);
@@ -208,9 +209,10 @@ export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz
       <TableCell><Check name={`选择文章${a.title || a.id}`} checked={selected.includes(a.id)} onChange={() => setSelected(old => toggle(old, a.id))} /></TableCell><TableCell className="max-w-xl"><p className="font-medium">{a.title || "无标题"}</p><p className="mt-1 text-xs text-muted-foreground">{a.account || a.author || ""}</p></TableCell><TableCell className="whitespace-nowrap text-xs">{dt(a.published_at)}</TableCell>
       <TableCell className="text-xs">
         <div className="grid grid-cols-2 items-center gap-x-3 gap-y-1 whitespace-nowrap">
-          <span>阅读 {a.interactions.read_count ?? "—"}</span>
+          <span>阅读 {a.interactions.read_display ?? a.interactions.read_count ?? "—"}</span>
           <span>点赞 {a.interactions.like_count ?? "—"}</span>
           <span>在看 {a.interactions.watching_count ?? "—"}</span>
+          <span>分享 {a.interactions.share_count ?? "—"}</span>
           <button type="button" className="w-fit rounded-sm text-left text-link hover:underline"
             onClick={() => setCommentArticle({ id: a.id, title: a.title || "无标题", count: a.interactions.comment_count })}>
             {a.interactions.comment_count == null ? "查看留言" : `评论 ${a.interactions.comment_count}`}
@@ -222,7 +224,8 @@ export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz
       </div></TableCell>
     </TableRow>)}</TableBody></Table>{!rows.length && <Empty>{articles.isPending ? "正在读取文章…" : "尚无文章。请先获取公众号第一页。"}</Empty>}
     <Pager label="文章库" page={page} total={total} pageSize={pageSize} busy={articles.isFetching} unit="篇" onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} /></CardContent></Card>
-    {commentArticle && <ArticleComments key={commentArticle.id} article={commentArticle} onClose={() => setCommentArticle(null)} />}
+    {commentArticle && <ArticleComments key={commentArticle.id} article={commentArticle}
+      canImport={clientHealth.data?.platform === "windows"} onClose={() => setCommentArticle(null)} />}
     <Dialog open={!!reader} onOpenChange={open => { if (!open) setReader(null); }}><DialogContent className="flex h-[85vh] max-w-4xl flex-col"><DialogHeader><DialogTitle>{reader?.title}</DialogTitle><DialogDescription>阅读本地正文；未保存的远程图片不会自动加载。</DialogDescription></DialogHeader>{reader?.html ? <iframe title="文章阅读" className="min-h-0 flex-1 rounded-lg border bg-white" sandbox="" srcDoc={reader.html} /> : <div className="prose min-h-0 max-w-none flex-1 overflow-auto dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => <span className="text-sm text-muted-foreground">［图片未保存］</span>, a: ({ href, children }) => <button className="text-link underline" onClick={() => { if (href && /^https?:\/\//.test(href)) void openExternal(href).catch(e => toast.error(String(e))); }}>{children}</button> }}>{reader?.markdown}</ReactMarkdown></div>}</DialogContent></Dialog>
     <Dialog open={!!deleting} onOpenChange={open => { if (!open && !busy) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>删除所选 {deleting?.length ?? 0} 篇文章</DialogTitle><DialogDescription>文章将从文章库及后续整号下载、导出中移除。已有文件和任务记录保留。未结束下载任务中的文章需先取消相关任务。</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setDeleting(null)}>取消</Button><Button variant="destructive" disabled={busy} onClick={() => run(async () => { const removed = await deleteArticles(deleting!); setSelected(old => old.filter(id => !deleting!.includes(id))); setDeleting(null); toast.success(`已删除 ${removed} 篇文章`); })}>确认删除</Button></div></DialogContent></Dialog>
   </Page>;

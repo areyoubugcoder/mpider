@@ -165,8 +165,10 @@ export interface SystemStatus {
 /** 「公众号文章」列表行（后端 ArticleItem）。 */
 export interface ArticleInteractions {
   read_count: number | null;
+  read_display: string | null;
   like_count: number | null;
   watching_count: number | null;
+  share_count: number | null;
   comment_count: number | null;
 }
 

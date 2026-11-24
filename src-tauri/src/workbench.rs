@@ -97,6 +97,23 @@ pub async fn workbench_fetch_article_comments(
 }
 
 #[tauri::command]
+pub async fn workbench_import_rendered_comments(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<usize, String> {
+    #[cfg(windows)]
+    {
+        core::rendered_comments::import_clipboard(&state.store, article_id)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (state, article_id);
+        Err("从微信导入留言目前支持 Windows".into())
+    }
+}
+
+#[tauri::command]
 pub fn workbench_article_body_states(
     state: State<'_, AppState>,
     article_ids: Vec<i64>,

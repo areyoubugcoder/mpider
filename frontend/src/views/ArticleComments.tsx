@@ -3,7 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { articleComments, fetchArticleComments, type ArticleComment } from "@/lib/workbench";
+import { articleComments, fetchArticleComments, importRenderedComments, type ArticleComment } from "@/lib/workbench";
 
 const REPLIES_PER_PAGE = 3;
 
@@ -42,9 +42,11 @@ function CommentThread({ comment, depth = 0 }: { comment: ArticleComment; depth?
 export function ArticleComments({
   article,
   onClose,
+  canImport,
 }: {
   article: { id: number; title: string; count: number | null };
   onClose: () => void;
+  canImport: boolean;
 }) {
   const query = useInfiniteQuery({
     queryKey: ["article-comments", article.id],
@@ -59,6 +61,8 @@ export function ArticleComments({
   const comments = query.data?.pages.flatMap(page => page.items) ?? [];
   const incomplete = newest != null && reported != null && cached < reported;
   const [fetchingRemote, setFetchingRemote] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const canFetchRemote = newest?.can_fetch_more === true;
   async function loadMore() {
@@ -83,12 +87,34 @@ export function ArticleComments({
   }
 
 
+  async function importFromWeChat() {
+    setImporting(true);
+    setRemoteError(null);
+    setImportMessage(null);
+    try {
+      const saved = await importRenderedComments(article.id);
+      await query.refetch({ throwOnError: true });
+      setImportMessage(`已导入 ${saved} 条公开留言及已展开的回复。`);
+    } catch (error) {
+      setRemoteError(String(error));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
     <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-3">
       <DialogHeader className="shrink-0 pr-4">
         <DialogTitle>文章留言{reported != null && ` · ${reported}`}</DialogTitle>
         <DialogDescription className="line-clamp-2">{article.title}</DialogDescription>
       </DialogHeader>
+      {canImport && <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border pb-2">
+        <Button size="sm" variant="outline" disabled={importing || fetchingRemote} onClick={() => void importFromWeChat()}>
+          {importing ? "正在导入…" : "从微信导入"}
+        </Button>
+        <p className="text-xs text-muted-foreground">在微信原文打开留言区，按 Ctrl+A、Ctrl+C 后导入。展开更多留言或回复后可再次导入。</p>
+        {importMessage && <p role="status" className="w-full text-xs text-muted-foreground">{importMessage}</p>}
+      </div>}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
         {query.isPending && <p role="status" className="py-8 text-center text-sm text-muted-foreground">正在读取留言…</p>}
         {query.isError && !query.data && <div className="space-y-3 py-8 text-center">

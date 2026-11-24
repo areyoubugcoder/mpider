@@ -143,3 +143,6 @@ export const articleComments = (articleId: number, after: number | null) =>
 
 export const fetchArticleComments = (articleId: number) =>
   invoke<void>("workbench_fetch_article_comments", { articleId });
+
+export const importRenderedComments = (articleId: number) =>
+  invoke<number>("workbench_import_rendered_comments", { articleId });
