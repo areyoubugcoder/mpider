@@ -102,10 +102,10 @@ export function Sidebar({
         <Dialog>
           <DialogTrigger asChild><button type="button" className="mb-2 flex items-center gap-3 rounded-lg border border-sidebar-border p-2 text-left hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
             <img src={donationQr} alt="微信赞赏码缩略图" className="size-14 shrink-0 rounded-md bg-white object-contain" />
-            <span><span className="block text-sm font-medium">打赏支持</span><span className="mt-1 block text-xs text-muted-foreground">点击放大赞赏码</span></span>
+            <span><span className="block text-sm font-medium">请作者喝杯Coffee~</span><span className="mt-1 block text-xs text-muted-foreground">点击放大赞赏码</span></span>
           </button></DialogTrigger>
           <DialogContent className="max-h-[calc(100vh-2rem)] max-w-sm overflow-y-auto">
-            <DialogHeader><DialogTitle>打赏支持 MPider</DialogTitle><DialogDescription>如果 MPider 对你有帮助，欢迎自愿打赏支持。</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>请作者喝杯Coffee~</DialogTitle><DialogDescription>如果 MPider 对你有帮助，欢迎请作者喝杯Coffee~</DialogDescription></DialogHeader>
             <img src={donationQr} alt="微信赞赏码" className="mx-auto w-full max-w-80 rounded-xl bg-white" />
           </DialogContent>
         </Dialog>
