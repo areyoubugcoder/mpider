@@ -173,9 +173,9 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 - [ ] **任务体验**：优化批量操作、进度展示、失败重试与诊断信息。
 - [ ] **数据管理**：完善备份恢复、归档迁移和本地存储清理。
 
-## 请作者喝杯Coffee~
+## 请作者喝杯☕~
 
-如果 MPider 对你有帮助，欢迎请作者喝杯Coffee~
+如果 MPider 对你有帮助，欢迎请作者喝杯☕~
 
 <img src="docs/assets/wechat-donation.png" alt="微信赞赏码" width="240" />
 
