@@ -1,10 +1,17 @@
 //! Windows 采集工作台：独立任务、历史检查点、游标实验和离线归档的公开契约。
 pub mod archive;
+mod article_session;
+mod authenticated_comments;
+pub mod collection;
+pub mod comments;
 pub mod discovery;
 pub mod engine;
 mod export_html;
+pub mod interactions;
 pub mod markdown_export;
 pub mod push_monitor;
+#[cfg(any(windows, test))]
+pub mod rendered_comments;
 mod request;
 #[cfg(test)]
 mod tests;
@@ -22,6 +29,7 @@ pub struct Policy {
     pub body_gap_ms: u64,
     pub body_daily_budget: i64,
     pub image_gap_ms: u64,
+    pub interaction_gap_ms: u64,
     pub body_workers: usize,
     pub image_workers: usize,
     pub retries: u32,
@@ -33,12 +41,13 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             version: 1,
-            list_min_ms: 90000,
-            list_max_ms: 120000,
+            list_min_ms: 3000,
+            list_max_ms: 5000,
             list_daily_budget: 60,
-            body_gap_ms: 1000,
+            body_gap_ms: 200,
             body_daily_budget: 86400,
-            image_gap_ms: 1000,
+            image_gap_ms: 200,
+            interaction_gap_ms: 1000,
             body_workers: 4,
             image_workers: 4,
             retries: 2,
@@ -55,7 +64,9 @@ impl Policy {
             "列表间隔范围无效"
         );
         ensure!(
-            self.body_gap_ms <= 86400000 && self.image_gap_ms <= 86400000,
+            self.body_gap_ms <= 86400000
+                && self.image_gap_ms <= 86400000
+                && self.interaction_gap_ms <= 86400000,
             "请求间隔不能超过一天"
         );
         ensure!(self.list_daily_budget > 0, "列表预算须为正数");
@@ -191,6 +202,7 @@ pub struct CursorRecord {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TaskProgress {
+    pub collection: Option<collection::Progress>,
     /// 已被服务端拒绝的会话版本；恢复前必须实际保存不同版本的会话。
     pub blocked_session_id: Option<String>,
     pub session_recovery: Option<SessionRecovery>,
@@ -346,6 +358,8 @@ pub struct QueueProgress {
 pub struct ActiveQueues {
     pub download: QueueProgress,
     pub history: QueueProgress,
+    pub interactions: QueueProgress,
+    pub comments: QueueProgress,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { View } from "@/views/types";
 import appIcon from "@/assets/app-icon.png";
 import feedbackQr from "@/assets/feedback-group-qr.png";
+import donationQr from "../../../docs/assets/wechat-donation.png";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface NavItem {
@@ -98,6 +99,16 @@ export function Sidebar({
         ))}
       </nav>
       <div className="mx-3 mb-3 flex flex-col gap-0.5">
+        <Dialog>
+          <DialogTrigger asChild><button type="button" className="mb-2 flex items-center gap-3 rounded-lg border border-sidebar-border p-2 text-left hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+            <img src={donationQr} alt="微信赞赏码缩略图" className="size-14 shrink-0 rounded-md bg-white object-contain" />
+            <span><span className="block text-sm font-medium">请作者喝杯☕~</span><span className="mt-1 block text-xs text-muted-foreground">点击放大赞赏码</span></span>
+          </button></DialogTrigger>
+          <DialogContent className="max-h-[calc(100vh-2rem)] max-w-sm overflow-y-auto">
+            <DialogHeader><DialogTitle>请作者喝杯☕~</DialogTitle><DialogDescription>如果 MPider 对你有帮助，欢迎请作者喝杯☕~</DialogDescription></DialogHeader>
+            <img src={donationQr} alt="微信赞赏码" className="mx-auto w-full max-w-80 rounded-xl bg-white" />
+          </DialogContent>
+        </Dialog>
         <Dialog>
           <DialogTrigger asChild>
             <button type="button" className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">

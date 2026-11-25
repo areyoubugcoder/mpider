@@ -939,6 +939,7 @@ async fn experiment_tick(store: &Store, root: &Path, mut e: Experiment) -> Resul
 
 /// 应用常驻时运行；历史恢复由用户发起，实验按持久化时点自动恢复。
 pub async fn run(store: Arc<Store>, root: PathBuf) {
+    tokio::spawn(super::collection::run(store.clone()));
     let archive_store = store.clone();
     let archive_root = root.clone();
     tokio::spawn(async move { archive::run(archive_store, archive_root).await });

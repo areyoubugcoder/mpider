@@ -11,25 +11,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pager, usePaged, useServerPage } from "@/components/Pager";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { Switch } from "@/components/ui/switch";
 import { TaskTabs } from "@/components/TaskTabs";
 import { TextAction } from "@/components/TextAction";
+import { ArticleComments } from "./ArticleComments";
 import { HomeMonitoringCard } from "@/components/HomeSync";
 import { TaskMoreActions, TaskPrimaryAction } from "@/components/TaskRowActions";
 import { canCancelTask, sourceBodyAction } from "@/lib/action-visibility";
 import { relativeTime } from "@/lib/relative-time";
-import { recoveryIsWaiting, recoveryMessage } from "@/lib/home-sync";
+import { needsSessionRecovery, recoveryIsWaiting, recoveryMessage } from "@/lib/home-sync";
 import { Popover, PopoverTrigger, PopoverContent, PopoverClose } from "@/components/ui/popover";
 import { coreHealth, nativeEnvironment, getArticleDetail, openExternal, listArticles, articleSelectionIds, listAccounts, revealInFolder, listLogs, sysproxyResetStale, DEFAULT_CFG } from "@/lib/tauri";
-import { logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage, requestPage, downloadArticles, exportArticles, deleteArticles, deleteSource, downloadSourceBodies, exportSourceArticles, syncSourceHome, createHistory, readArchive, savePolicy, exportRequests, pythonPath, type Policy, type Task, type DownloadReceipt, type MarkdownExport } from "@/lib/workbench";
+import { fetchArticleInteractions, fetchArticleComments, type ArticleCollection, logUiError, workbenchSnapshot, articleBodyStates, sourcePage, taskPage, requestPage, downloadArticles, exportArticles, deleteArticles, restoreArticles, deleteSource, downloadSourceBodies, exportSourceArticles, syncSourceHome, createHistory, readArchive, savePolicy, exportRequests, pythonPath, type Policy, type Task, type DownloadReceipt, type MarkdownExport } from "@/lib/workbench";
 
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 const names: Record<string, string> = {
-  redirect: "文章链接跳转",
+  redirect: "文章链接跳转", article_comments: "文章留言", article_interactions: "文章互动",
   push_metadata: "推送文章解析", invalid_metadata: "文章信息不完整", rate_limited: "请求受限",
   starting: "正在准备", stopping: "正在停止", stopped: "已停止", observed: "已观察", observed_home: "用户原生列表",
   recovering: "正在恢复", queued: "排队中", running: "运行中", paused: "已暂停", needs_action: "待人工处理", done: "已结束", cancelled: "已取消", failed: "失败",
@@ -38,7 +39,7 @@ const names: Record<string, string> = {
   verification_required: "需要验证", unavailable: "正文不可用", empty_body: "未解析到正文", invalid_encoding: "编码异常", invalid_image: "图片格式异常", network_error: "网络异常",
   timeout: "超时", session_timeout: "会话已过期", http_error: "HTTP异常", network_or_storage_error: "网络或存储异常", protocol_or_session_error: "协议或会话异常",
   scheduled: "定时验证", control_home: "同会话首页对照", control_page: "新游标分页对照", recheck: "原游标复测",
-  home_sync: "首页同步", list: "列表", body: "文章", image: "图片", webpage: "网页解析", home: "首页识别", history: "历史采集", history_rebuild: "历史重建", cursor_experiment: "游标实验",
+  home_sync: "首页同步", list: "列表", body: "文章", image: "图片", webpage: "网页解析", interaction: "互动和评论", home: "首页识别", history: "历史采集", history_rebuild: "历史重建", cursor_experiment: "游标实验",
   history_control_home: "历史首页对照", history_control_page: "历史新游标对照", history_recheck: "历史原游标复测", archive_control: "文章验证对照",
   cursor_control_home: "首页对照", cursor_control_page: "新游标对照", cursor_recheck: "原游标复测", archive: "文章下载", archive_retry: "下载重试",
   rate_signal: "访问频率信号", schema_or_identity_error: "结构或身份不符", worker_error: "运行环境异常",
@@ -51,7 +52,7 @@ function useAction() {
   async function run(fn: () => Promise<unknown>, message?: string) {
     setBusy(true);
     try { await fn(); await qc.invalidateQueries(); if (message) toast.success(message); }
-    catch (e) { toast.error(String(e)); void logUiError("action_failed", String(e)).catch(error => console.error("操作异常日志写入失败", error)); }
+    catch (e) { toast.error(String(e), { duration: 15000 }); void logUiError("action_failed", String(e)).catch(error => console.error("操作异常日志写入失败", error)); }
     finally { setBusy(false); }
   }
   return { busy, run };
@@ -64,10 +65,10 @@ function Panel({ title, description, children }: { title: string; description?: 
 }
 function State({ value }: { value: string }) { return <span className={`whitespace-nowrap rounded-full bg-muted px-2 py-1 text-xs ${["failed", "unusable"].includes(value) ? "text-destructive" : ["needs_action", "partial", "paused"].includes(value) ? "text-warning" : "text-foreground"}`}>{label(value)}</span>; }
 function Empty({ children }: { children: ReactNode }) { return <p className="py-6 text-center text-sm text-muted-foreground">{children}</p>; }
-function Check({ checked, onChange, name }: { checked: boolean; onChange: () => void; name: string }) { return <input type="checkbox" className="size-4 accent-primary" aria-label={name} checked={checked} onChange={onChange} />; }
+function Check({ checked, onChange, name, disabled }: { checked: boolean; onChange: () => void; name: string; disabled?: boolean }) { return <input disabled={disabled} type="checkbox" className="size-4 accent-primary" aria-label={name} checked={checked} onChange={onChange} />; }
 function toggle(values: number[], id: number) { return values.includes(id) ? values.filter(v => v !== id) : [...values, id]; }
 
-export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
+export function WorkbenchSources({onArticles,collecting,onCollect}:{onArticles:(biz:string)=>void;collecting:boolean;onCollect:(biz:string,kind:ArticleCollection)=>Promise<void>}) {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now() / 1000), 30000); return () => clearInterval(timer); }, []);
   const snapshot = useSnapshot(); const { busy, run } = useAction();
@@ -93,32 +94,23 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
         const history = s.history_task;
         const pendingHome = canCancelTask(home);
         const pendingHistory = canCancelTask(history);
-        const bodyAction = sourceBodyAction(articleCount, s.body_count);
         return <TableRow key={s.biz}>
           <TableCell><p className="font-medium">{s.nickname}</p><p className="max-w-52 break-all font-mono text-xs text-muted-foreground">{s.biz}</p></TableCell>
           <TableCell className="whitespace-nowrap">{`${articleCount} 篇`}</TableCell>
           <TableCell className="whitespace-nowrap text-xs"><time dateTime={Number.isFinite(s.updated_at) && s.updated_at > 0 ? new Date(s.updated_at * 1000).toISOString() : undefined} title={dt(s.updated_at)}>{relativeTime(s.updated_at, now)}</time></TableCell>
-          <TableCell><p className="text-xs text-muted-foreground">{s.session_id ? "会话已登记" : "待打开主页"}</p>{home && <p className="mt-1 text-xs">首页同步：{label(home.state)}{home.state === "done" ? ` · 新入库 ${home.progress.new_articles} 篇` : ""}</p>}{history && <p className="mt-1 text-xs">历史采集：{label(history.state)}</p>}{home && recoveryIsWaiting(home) && <p role="status" className="mt-1 max-w-56 text-xs text-warning">{recoveryMessage(home, data?.discovery)}</p>}</TableCell>
+          <TableCell><p className="text-xs text-muted-foreground">{s.session_id ? "会话已登记" : "待打开主页"}</p>{home && <p className="mt-1 text-xs">首页同步：{label(home.state)}{home.state === "done" ? ` · 新入库 ${home.progress.new_articles} 篇` : ""}</p>}{history && <p className="mt-1 text-xs">历史采集：{label(history.state)}</p>}{home && needsSessionRecovery(home, s) && <p role="status" className="mt-1 max-w-56 text-xs text-warning">{recoveryMessage(home, data?.discovery, s)}</p>}</TableCell>
           <TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <TextAction disabled={busy} onClick={() => onArticles(s.biz)}>查看文章</TextAction>
             {pendingHome ? <TaskPrimaryAction task={home!} source={s} busy={busy} run={run} labels={{pause:"暂停同步",resume:home!.state === "failed" ? "重试同步" : "继续同步",recover:"更新会话并继续同步",stop_recovery:"取消同步自动继续"}} /> : <TextAction disabled={busy} onClick={() => run(() => syncSourceHome(s.biz), "首页同步任务已加入队列；会话未就绪时将提示打开该公众号主页")}>同步最新文章</TextAction>}
-            {pendingHistory ? <TaskPrimaryAction task={history!} source={s} busy={busy} run={run} labels={{pause:"暂停历史采集",resume:history!.state === "failed" ? "重试历史采集" : "继续历史采集",recover:"更新会话并继续历史",stop_recovery:"取消历史自动继续"}} /> : <TextAction disabled={busy} onClick={() => { setMode("count"); setCount(100); setDate(""); setHistorySource({biz:s.biz,nickname:s.nickname}); }}>采集历史文章</TextAction>}
-
-            {bodyAction === "download" && <Popover><PopoverTrigger asChild><TextAction disabled={busy}>下载全部文章</TextAction></PopoverTrigger><PopoverContent aria-label={`下载${s.nickname}全部正文`}>
-              <p className="text-sm font-medium">下载全部文章</p><p className="mt-2 text-sm text-muted-foreground">获取本地已经入库的文章正文。</p><p className="mt-2 text-xs text-muted-foreground">共 {articleCount ?? 0} 篇，已下载的文章自动跳过。正文、封面和图片随首次下载保存，队列进度见窗口底部，可在任务页暂停或继续。之后新增文章可再次下载。</p>
-              <PopoverClose asChild><Button className="mt-4" size="sm" disabled={busy} onClick={() => run(async () => { showDownloadReceipt(await downloadSourceBodies(s.biz)); })}>开始下载</Button></PopoverClose>
-            </PopoverContent></Popover>}
-            <Popover><PopoverTrigger asChild><TextAction disabled={busy}>导出所有文章</TextAction></PopoverTrigger><PopoverContent aria-label={`导出${s.nickname}所有文章`}>
-              <p className="text-sm font-medium">导出所有文章</p><p className="mt-2 text-sm text-muted-foreground">导出该公众号本地已入库的全部 {articleCount} 篇文章，包含所有分页。同时生成 Markdown 和 HTML，并附带已保存的图片。</p>
-              {bodyAction !== null && <p className="mt-2 text-xs text-muted-foreground">已下载文章 {s.body_count} / {articleCount} 篇。</p>}
-              {bodyAction === "download" && <p role="status" className="mt-2 text-xs text-warning">还有 {articleCount - s.body_count} 篇正文未下载，导出时将自动跳过。</p>}
-              {bodyAction === null && <p role="status" className="mt-2 text-xs text-muted-foreground">{articleCount === 0 ? "暂无可导出的文章，请先同步最新文章或采集历史文章。" : "暂时无法确认文章下载状态，请稍后重试。"}</p>}
-              <div className="mt-4 flex flex-wrap gap-2">
-                {bodyAction === "download" && <PopoverClose asChild><Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showDownloadReceipt(await downloadSourceBodies(s.biz)))}>下载未完成文章</Button></PopoverClose>}
-                <PopoverClose asChild><Button size="sm" disabled={busy || bodyAction === null || s.body_count === 0} onClick={() => run(async () => showExportResult(await exportSourceArticles(s.biz)))}>选择导出路径</Button></PopoverClose>
-              </div>
-            </PopoverContent></Popover>
-            <TaskMoreActions tasks={[{task:home,label:"取消首页同步"},{task:history,label:"取消历史采集"}]} busy={busy} run={run}><DropdownMenuItem className="text-destructive focus:text-destructive" disabled={busy} onSelect={() => setDeletingSource({biz:s.biz,nickname:s.nickname,article_count:s.article_count})}>删除公众号</DropdownMenuItem></TaskMoreActions>
+            <TaskMoreActions tasks={[{task:home,label:"取消首页同步"},{task:history,label:"取消历史采集"}]} busy={busy} run={run}>
+              {pendingHistory ? <TaskPrimaryAction menu task={history!} source={s} busy={busy} run={run} labels={{pause:"暂停历史采集",resume:"继续历史采集",recover:"更新会话并继续历史",stop_recovery:"取消历史自动继续"}} /> : <DropdownMenuItem disabled={busy} onSelect={() => {setMode("count");setCount(100);setDate("");setHistorySource({biz:s.biz,nickname:s.nickname});}}>采集历史文章</DropdownMenuItem>}
+              <DropdownMenuItem disabled={busy || !articleCount} onSelect={()=>void run(async()=>showDownloadReceipt(await downloadSourceBodies(s.biz)))}>下载未完成文章</DropdownMenuItem>
+              <DropdownMenuItem disabled={busy || !s.body_count} onSelect={()=>void run(async()=>showExportResult(await exportSourceArticles(s.biz)))}>导出已下载文章</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={busy || collecting || !articleCount} onSelect={()=>void onCollect(s.biz,"interactions")}>获取互动数据…</DropdownMenuItem>
+              <DropdownMenuItem disabled={busy || collecting || !articleCount} onSelect={()=>void onCollect(s.biz,"comments")}>获取文章评论…</DropdownMenuItem>
+              <DropdownMenuSeparator /><DropdownMenuItem className="text-destructive focus:text-destructive" disabled={busy} onSelect={()=>setDeletingSource({biz:s.biz,nickname:s.nickname,article_count:s.article_count})}>删除公众号</DropdownMenuItem>
+            </TaskMoreActions>
           </div></TableCell>
         </TableRow>;
       })}</TableBody></Table> : <Empty>{listing.isPending ? "正在读取公众号…" : listing.error ? "公众号读取失败，请重试。" : search ? "没有匹配的公众号。" : "尚无公众号。开启主页识别后，请在微信手动打开公众号主页。"}</Empty>}
@@ -135,7 +127,8 @@ export function WorkbenchSources({onArticles}:{onArticles:(biz:string)=>void}) {
   </Page>;
 }
 
-function taskTarget(t: Task) { return t.kind === "home" ? "最新文章（仅首页）" : t.kind === "archive" ? `${t.target.article_ids?.length ?? 0} 篇文章下载` : t.target.pages ? "获取下一页" : t.target.count ? `追加 ${t.target.count} 篇` : `采集至 ${dt(t.target.cutoff_at)}`; }
+const taskNames: Record<Task["kind"], string> = {home:"首页同步",history:"历史采集",archive:"文章下载",interactions:"互动数据",comments:"文章评论"};
+function taskTarget(t: Task) { if(t.kind==="interactions"||t.kind==="comments")return `${t.target.article_ids?.length ?? 0} 篇 · ${t.target.refresh ? "刷新及补采" : "仅补采缺失"}`; return t.kind === "home" ? "最新文章（仅首页）" : t.kind === "archive" ? `${t.target.article_ids?.length ?? 0} 篇文章下载` : t.target.pages ? "获取下一页" : t.target.count ? `追加 ${t.target.count} 篇` : `采集至 ${dt(t.target.cutoff_at)}`; }
 function pageResult(t: Task) {
   return `已获取 ${t.progress.pages} 页${t.progress.received_articles != null ? ` · 返回 ${t.progress.received_articles} 篇` : ""} · 新入库 ${t.progress.new_articles} 篇`;
 }
@@ -145,16 +138,16 @@ export function WorkbenchTasks({kind,onKindChange}:{kind:Task["kind"];onKindChan
   useEffect(()=>setPage(0),[kind]);
   const listing=useQuery({queryKey:["task-page",kind,page,pageSize],queryFn:()=>taskPage(kind,pageSize,page*pageSize),refetchInterval:2000});
   useServerPage(listing.data?.total,pageSize,page,setPage);
-  return <Page title="任务" description="首页同步、历史列表和文章下载分别管理。一个公众号等待人工处理时，其他已就绪任务可以继续。">
+  return <Page title="任务" description="首页同步、历史列表、下载、互动和评论分别管理。任务可以暂停、继续或取消。">
     <TaskTabs value={kind} onChange={next=>{onKindChange(next);setPage(0);}} />
-    <div role="tabpanel" id="task-panel" aria-labelledby={`task-tab-${kind}`} aria-label={kind==="home"?"首页同步任务":kind==="history"?"历史采集任务":"文章下载任务"}>
-    <Panel title={kind === "home" ? "首页同步任务" : kind === "history" ? "历史文章任务" : "文章下载任务"}>
+    <div role="tabpanel" id="task-panel" aria-labelledby={`task-tab-${kind}`} aria-label={`${taskNames[kind]}任务`}>
+    <Panel title={`${taskNames[kind]}任务`}>
       {!!listing.data?.items.length && data ? <Table><TableHeader><TableRow>{["任务", "目标", "进度", "状态", "操作"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{listing.data.items.map(t => <TableRow key={t.id}>
-        <TableCell><p>#{t.id} {data.sources.find(s => s.biz === t.biz)?.nickname || (kind === "archive" ? "文章下载" : "公众号")}</p><p className="text-xs text-muted-foreground">{dt(t.created_at)}</p></TableCell><TableCell>{taskTarget(t)}</TableCell>
-        <TableCell>{kind !== "archive" ? <><p>{pageResult(t)}</p>{kind === "history" && !t.target.pages && <p className="text-xs text-muted-foreground">已计入历史目标 {t.progress.completed} 篇</p>}</> : <p>{t.progress.completed} 篇</p>}{kind === "archive" && <p className="text-xs text-muted-foreground">跳过 {t.progress.skipped ?? 0} · 缺图 {t.progress.partial} · 失败 {t.progress.failed}</p>}{t.progress.rebuilds > 0 && <p className="text-xs text-warning">重建 {t.progress.rebuilds} 次{t.progress.rebuilding ? " · 定位中" : ""}</p>}</TableCell>
-        <TableCell><State value={recoveryIsWaiting(t) ? "recovering" : t.state} /><p className="mt-2 max-w-80 text-xs text-muted-foreground">{recoveryIsWaiting(t) ? recoveryMessage(t, data.discovery) : t.reason}</p>{t.state === "running" && t.next_action_at > Date.now() / 1000 && <p className="text-xs text-muted-foreground">下一次不早于 {dt(t.next_action_at)}</p>}</TableCell>
+        <TableCell><p>#{t.id} {data.sources.find(s => s.biz === t.biz)?.nickname || taskNames[kind]}</p><p className="text-xs text-muted-foreground">{dt(t.created_at)}</p></TableCell><TableCell>{taskTarget(t)}</TableCell>
+        <TableCell>{(kind === "home" || kind === "history") ? <><p>{pageResult(t)}</p>{kind === "history" && !t.target.pages && <p className="text-xs text-muted-foreground">已计入历史目标 {t.progress.completed} 篇</p>}</> : <p>已处理 {t.progress.completed} / {t.target.article_ids?.length ?? 0} 篇</p>}{(kind==="interactions"||kind==="comments") && <><p className="text-xs text-muted-foreground">跳过 {t.progress.skipped} 篇</p>{t.progress.collection && <p className="mt-1 max-w-72 text-xs text-muted-foreground"><span className="line-clamp-2">{t.progress.collection.title}</span>{kind==="comments" && <>已获取第 {t.progress.collection.pages} 页 · 回复 {t.progress.collection.reply_pages} 页<br/>新增 {t.progress.collection.added} · 更新 {t.progress.collection.updated} · 未变化 {t.progress.collection.unchanged}</>}</p>}</>}{kind === "archive" && <p className="text-xs text-muted-foreground">跳过 {t.progress.skipped ?? 0} · 缺图 {t.progress.partial} · 失败 {t.progress.failed}</p>}{t.progress.rebuilds > 0 && <p className="text-xs text-warning">重建 {t.progress.rebuilds} 次{t.progress.rebuilding ? " · 定位中" : ""}</p>}</TableCell>
+        <TableCell><State value={recoveryIsWaiting(t) ? "recovering" : t.state} /><p className="mt-2 max-w-80 text-xs text-muted-foreground">{needsSessionRecovery(t, data.sources.find(s => s.biz === t.biz)) ? recoveryMessage(t, data.discovery, data.sources.find(s => s.biz === t.biz)) : t.reason}</p>{t.state === "running" && t.next_action_at > Date.now() / 1000 && <p className="text-xs text-muted-foreground">下一次不早于 {dt(t.next_action_at)}</p>}</TableCell>
         <TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><TaskPrimaryAction task={t} source={data.sources.find(s => s.biz === t.biz)} busy={busy} run={run} onRetry={async () => showDownloadReceipt(await downloadArticles(t.target.article_ids || []))} /><TaskMoreActions tasks={[{task:t,label:"取消任务"}]} busy={busy} run={run} /></div></TableCell>
-      </TableRow>)}</TableBody></Table> : <Empty>{listing.isPending ? "正在读取任务…" : listing.error ? "任务读取失败，请重试。" : kind === "home" ? "暂无首页同步任务，请在公众号操作列发起。" : kind === "history" ? "暂无历史任务，请在公众号操作列设置范围后创建。" : "暂无正文任务，请在公众号列表或文章库点击下载。"}</Empty>}
+      </TableRow>)}</TableBody></Table> : <Empty>{listing.isPending ? "正在读取任务…" : listing.error ? "任务读取失败，请重试。" : kind === "home" ? "暂无首页同步任务，请在公众号操作列发起。" : kind === "history" ? "暂无历史任务，请在公众号操作列设置范围后创建。" : kind==="archive" ? "暂无正文任务，请在公众号列表或文章库点击下载。" : "暂无采集任务，请在公众号列表的更多菜单或文章库发起。"}</Empty>}
       {listing.error && <p role="alert" className="text-sm text-destructive">任务读取失败：{String(listing.error)}</p>}
       <Pager label="任务" page={page} total={listing.data?.total??0} pageSize={pageSize} busy={listing.isFetching} onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} />
     </Panel></div>
@@ -167,17 +160,21 @@ function showDownloadReceipt(result: DownloadReceipt) {
 function showExportResult(result: MarkdownExport | null) {
   if (result) toast.success(`已导出 ${result.with_body} 篇 · Markdown 和 HTML`, { description: `${result.missing_body ? `跳过 ${result.missing_body} 篇缺正文文章 · ` : ""}${result.directory}`, duration: 12000, action: { label: "打开目录", onClick: () => { void revealInFolder(`${result.directory}/index.html`).catch(e => toast.error(String(e))); } } });
 }
-export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz:string)=>void}) {
+export function WorkbenchArticles({biz,onBizChange,collecting,onCollect}:{biz:string;onBizChange:(biz:string)=>void;collecting:boolean;onCollect:(ids:number[],kind:ArticleCollection)=>Promise<void>}) {
   const snapshot = useSnapshot(); const { busy, run } = useAction();
+  const [commentArticle, setCommentArticle] = useState<{ id: number; title: string; count: number | null } | null>(null);
   const [page, setPage] = useState(0); const [pageSize,setPageSize]=useState(DEFAULT_PAGE_SIZE); const [selected, setSelected] = useState<number[]>([]);
   const [deleting, setDeleting] = useState<number[] | null>(null);
   const [reader, setReader] = useState<{ title: string; html?: string; markdown?: string } | null>(null);
   const [title, setTitle] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const downloaded = downloadStatus === "" ? undefined : downloadStatus === "downloaded";
   const accounts = useQuery({ queryKey: ["article-accounts"], queryFn: () => listAccounts() });
-  const articles = useQuery({ queryKey: ["articles", biz, page, pageSize, title, downloadStatus], queryFn: () => listArticles(biz || undefined, pageSize, page * pageSize, title, downloaded), refetchInterval: 3000 });
+  const articles = useQuery({ queryKey: ["articles", biz, page, pageSize, title, downloadStatus, includeDeleted], queryFn: () => listArticles(biz || undefined, pageSize, page * pageSize, title, downloaded, includeDeleted), refetchInterval: 3000 });
   const rows = articles.data?.items || []; const total = articles.data?.total || 0;
+  const selectable = rows.filter(article => !article.is_deleted);
+  const actionBusy = busy || collecting;
   const selectedStates = useQuery({queryKey:["selected-article-bodies",selected],queryFn:()=>articleBodyStates(selected),enabled:selected.length>0,refetchInterval:selected.length?3000:false});
   const selectionReady=!!selected.length && !!selectedStates.data && selected.some(id=>selectedStates.data[id]===true);
   const missingSelected=selectedStates.data?selected.filter(id=>!selectedStates.data[id]):[];
@@ -195,20 +192,54 @@ export function WorkbenchArticles({biz,onBizChange}:{biz:string;onBizChange:(biz
   return <Page title="文章库" description="下载后即可阅读，并同时导出 Markdown 和 HTML。单篇与勾选下载进入统一队列，整号下载请在公众号列表操作。">
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Label htmlFor="article-source">公众号</Label><select id="article-source" disabled={busy} className={selectClass} value={biz} onChange={e => { onBizChange(e.target.value); setPage(0); setSelected([]); }}><option value="">全部公众号</option>{accounts.data?.items.map(s => <option key={s.biz} value={s.biz}>{s.nickname || s.biz}</option>)}</select></div><span className="text-sm text-muted-foreground">共 {total} 篇</span></div>
     <div className="flex flex-wrap items-center gap-3">
-      <Label htmlFor="article-title">标题</Label><Input id="article-title" className="w-64" placeholder="输入标题关键词" value={title} disabled={busy} onChange={e => {setTitle(e.target.value);setPage(0);setSelected([]);}} />
-      <Label htmlFor="article-download-status">下载状态</Label><select id="article-download-status" className={selectClass} value={downloadStatus} disabled={busy} onChange={e => {setDownloadStatus(e.target.value);setPage(0);setSelected([]);}}><option value="">全部状态</option><option value="downloaded">已下载正文</option><option value="missing">未下载正文（含下载失败）</option></select>
-      <Button size="sm" variant="outline" disabled={busy || articles.isFetching || !total} onClick={() => run(async () => {const ids = await articleSelectionIds(biz || undefined, title, downloaded);setSelected(ids);})}>选择全部筛选结果（{total} 篇）</Button>
+      <div className="flex items-center gap-2"><Label htmlFor="article-title" className="whitespace-nowrap">标题</Label><Input id="article-title" className="w-56" placeholder="输入标题关键词" value={title} disabled={busy} onChange={e => {setTitle(e.target.value);setPage(0);setSelected([]);}} /></div>
+      <div className="flex items-center gap-2"><Label htmlFor="article-download-status" className="whitespace-nowrap">下载状态</Label><select id="article-download-status" className={selectClass} value={downloadStatus} disabled={busy} onChange={e => {setDownloadStatus(e.target.value);setPage(0);setSelected([]);}}><option value="">全部状态</option><option value="downloaded">已下载正文</option><option value="missing">未下载正文（含下载失败）</option></select></div>
+      <div className="flex items-center gap-2"><Label htmlFor="article-deleted-status" className="whitespace-nowrap">包含已删除文章</Label><select id="article-deleted-status" className={selectClass} value={String(includeDeleted)} disabled={busy} onChange={e => {setIncludeDeleted(e.target.value === "true");setPage(0);setSelected([]);}}><option value="false">否</option><option value="true">是</option></select></div>
+      <Button size="sm" variant="outline" disabled={busy || articles.isFetching || !total} onClick={() => run(async () => {const ids = await articleSelectionIds(biz || undefined, title, downloaded);setSelected(ids);})}>{includeDeleted ? "选择筛选结果中的未删除文章" : `选择全部筛选结果（${total} 篇）`}</Button>
       <span className="text-xs text-muted-foreground">跨页保留选择；修改筛选条件后清空选择。</span>
     </div>
-    {selected.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3"><span className="text-sm">已选择 {selected.length} 篇</span>{selectionReady ? <Button size="sm" variant="outline" disabled={busy} onClick={() => run(async () => showExportResult(await exportArticles(selected)))}>导出已下载文章</Button> : null}{missingSelected.length > 0 ? <Button size="sm" variant="outline" disabled={busy || selectedStates.isFetching} onClick={() => run(async () => showDownloadReceipt(await downloadArticles(missingSelected)))}>下载未完成文章</Button> : !selectionReady ? <span role="status" className="text-xs text-muted-foreground">{selectedStates.error ? "正文状态读取失败，请重试" : "正在检查正文状态…"}</span> : null}<Button size="sm" variant="destructive" disabled={busy} onClick={() => setDeleting([...selected])}>删除</Button><Button size="sm" variant="ghost" onClick={() => setSelected([])}>取消选择</Button></div>}
+    {selected.length > 0 && <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
+      <span className="text-sm">已选择 {selected.length} 篇</span>
+      <Button size="sm" disabled={actionBusy} onClick={() => void onCollect([...selected], "interactions")}>获取互动数据</Button>
+      <Button size="sm" variant="outline" disabled={actionBusy} onClick={() => void onCollect([...selected], "comments")}>获取评论</Button>
+      <Button size="sm" variant="outline" disabled={actionBusy || selectedStates.isFetching || !missingSelected.length} onClick={() => run(async () => showDownloadReceipt(await downloadArticles(missingSelected)))}>下载未完成文章</Button>
+      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={actionBusy} onClick={() => setDeleting([...selected])}>删除</Button>
+      {selectionReady && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline" disabled={actionBusy}>更多</Button></DropdownMenuTrigger><DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => void run(async () => showExportResult(await exportArticles(selected)))}>导出已下载文章</DropdownMenuItem>
+      </DropdownMenuContent></DropdownMenu>}
+      <Button size="sm" variant="ghost" onClick={() => setSelected([])}>取消选择</Button>
+      {!selectedStates.data && <span role="status" className="text-xs text-muted-foreground">{selectedStates.error ? "正文状态读取失败，请重试" : "正在检查正文状态…"}</span>}
+    </div>}
     {articles.error && <p role="alert" className="text-sm text-destructive">文章读取失败：{String(articles.error)}</p>}
-    <Card><CardContent className="pt-4"><Table><TableHeader><TableRow><TableHead><Check name="选择本页全部文章" checked={!!rows.length && rows.every(a => selected.includes(a.id))} onChange={() => setSelected(old => rows.every(a => old.includes(a.id)) ? old.filter(id => !rows.some(a => a.id === id)) : Array.from(new Set([...old, ...rows.map(a => a.id)])))} /></TableHead>{["文章", "发布时间", "操作"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(a => <TableRow key={a.id}>
-      <TableCell><Check name={`选择文章${a.title || a.id}`} checked={selected.includes(a.id)} onChange={() => setSelected(old => toggle(old, a.id))} /></TableCell><TableCell className="max-w-xl"><p className="font-medium">{a.title || "无标题"}</p><p className="mt-1 text-xs text-muted-foreground">{a.account || a.author || ""}</p></TableCell><TableCell className="whitespace-nowrap text-xs">{dt(a.published_at)}</TableCell><TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {a.has_body ? <><TextAction disabled={busy} onClick={() => run(() => read(a.id))}>阅读</TextAction><TextAction disabled={busy} onClick={() => run(async () => showExportResult(await exportArticles([a.id])))}>导出</TextAction></> : <TextAction disabled={busy} onClick={() => run(async () => showDownloadReceipt(await downloadArticles([a.id])))}>下载</TextAction>}
-        {a.content_url && <TextAction disabled={busy} onClick={() => run(() => openExternal(a.content_url!))}>查看原文</TextAction>}
-      </div></TableCell>
-    </TableRow>)}</TableBody></Table>{!rows.length && <Empty>{articles.isPending ? "正在读取文章…" : "尚无文章。请先获取公众号第一页。"}</Empty>}
+    <Card><CardContent className="pt-4"><Table className="min-w-[680px] table-fixed">
+      <colgroup><col className="w-10" /><col /><col className="w-[148px]" /><col className="w-[164px]" /><col className="w-[108px]" /></colgroup>
+      <TableHeader><TableRow><TableHead><Check name="选择本页未删除文章" disabled={!selectable.length} checked={!!selectable.length && selectable.every(a => selected.includes(a.id))} onChange={() => setSelected(old => selectable.every(a => old.includes(a.id)) ? old.filter(id => !selectable.some(a => a.id === id)) : Array.from(new Set([...old, ...selectable.map(a => a.id)])))} /></TableHead>{["文章", "发布时间", "互动", "操作"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader>
+      <TableBody>{rows.map(a => <TableRow key={a.id}>
+        <TableCell><Check name={`选择文章${a.title?.slice(0, 60) || a.id}`} disabled={a.is_deleted} checked={selected.includes(a.id)} onChange={() => setSelected(old => toggle(old, a.id))} /></TableCell>
+        <TableCell className="min-w-0"><p className="line-clamp-2 break-all font-medium" title={a.title || "无标题"}>{a.title || "无标题"}</p><div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground"><span className="truncate">{a.account || a.author || ""}</span>{a.is_deleted && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5">已删除</span>}</div></TableCell>
+        <TableCell className="whitespace-nowrap text-xs">{dt(a.published_at)}</TableCell>
+        <TableCell className="text-xs"><div className="grid grid-cols-2 items-center gap-x-3 gap-y-1 whitespace-nowrap">
+          {(a.interactions.read_display != null || a.interactions.read_count != null) && <span>阅读 {a.interactions.read_display ?? a.interactions.read_count}</span>}
+          {a.interactions.like_count != null && <span>点赞 {a.interactions.like_count}</span>}
+          {a.interactions.watching_count != null && <span>在看 {a.interactions.watching_count}</span>}
+          {a.interactions.share_count != null && <span>分享 {a.interactions.share_count}</span>}
+          {((a.interactions.comment_count ?? 0)>0 || (a.collection.comments && a.interactions.comment_count==null)) && <button type="button" disabled={a.is_deleted} className="w-fit rounded-sm text-left text-link hover:underline disabled:text-muted-foreground" onClick={()=>setCommentArticle({id:a.id,title:a.title||"无标题",count:a.interactions.comment_count})}>评论 {a.interactions.comment_count ?? ""}</button>}
+        </div></TableCell>
+        <TableCell><div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {a.has_body ? <TextAction disabled={actionBusy} onClick={() => run(() => read(a.id))}>阅读</TextAction> : !a.is_deleted && <TextAction disabled={actionBusy} onClick={() => run(async () => showDownloadReceipt(await downloadArticles([a.id])))}>下载</TextAction>}
+          {a.is_deleted && <TextAction disabled={actionBusy} onClick={() => run(() => restoreArticles([a.id]), "文章已恢复")}>恢复</TextAction>}
+          <DropdownMenu><DropdownMenuTrigger asChild><TextAction disabled={actionBusy} aria-label="更多文章操作">更多</TextAction></DropdownMenuTrigger><DropdownMenuContent align="end">
+            {!a.is_deleted && <DropdownMenuItem onSelect={() => void run(() => fetchArticleInteractions(a.id), "互动数据任务已创建，可在任务页暂停或取消")}>{a.collection.interactions ? "刷新互动数据" : "获取互动数据"}</DropdownMenuItem>}
+            {!a.is_deleted && <DropdownMenuItem onSelect={() => void run(async () => { await fetchArticleComments(a.id); setCommentArticle({ id: a.id, title: a.title || "无标题", count: a.interactions.comment_count }); }, "评论任务已创建，可在任务页暂停或取消")}>{a.collection.comments ? "刷新评论数据" : "获取评论"}</DropdownMenuItem>}
+            {a.content_url && <DropdownMenuItem onSelect={() => void run(() => openExternal(a.content_url!))}>查看原文</DropdownMenuItem>}
+            {a.has_body && !a.is_deleted && <DropdownMenuItem onSelect={() => void run(async () => showExportResult(await exportArticles([a.id])))}>导出文章</DropdownMenuItem>}
+            {!a.is_deleted && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting([a.id])}>删除文章</DropdownMenuItem></>}
+          </DropdownMenuContent></DropdownMenu>
+        </div></TableCell>
+      </TableRow>)}</TableBody></Table>{!rows.length && <Empty>{articles.isPending ? "正在读取文章…" : "暂无符合筛选条件的文章。"}</Empty>}
     <Pager label="文章库" page={page} total={total} pageSize={pageSize} busy={articles.isFetching} unit="篇" onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} /></CardContent></Card>
+    {commentArticle && <ArticleComments key={commentArticle.id} article={commentArticle}
+      onClose={() => setCommentArticle(null)} />}
     <Dialog open={!!reader} onOpenChange={open => { if (!open) setReader(null); }}><DialogContent className="flex h-[85vh] max-w-4xl flex-col"><DialogHeader><DialogTitle>{reader?.title}</DialogTitle><DialogDescription>阅读本地正文；未保存的远程图片不会自动加载。</DialogDescription></DialogHeader>{reader?.html ? <iframe title="文章阅读" className="min-h-0 flex-1 rounded-lg border bg-white" sandbox="" srcDoc={reader.html} /> : <div className="prose min-h-0 max-w-none flex-1 overflow-auto dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => <span className="text-sm text-muted-foreground">［图片未保存］</span>, a: ({ href, children }) => <button className="text-link underline" onClick={() => { if (href && /^https?:\/\//.test(href)) void openExternal(href).catch(e => toast.error(String(e))); }}>{children}</button> }}>{reader?.markdown}</ReactMarkdown></div>}</DialogContent></Dialog>
     <Dialog open={!!deleting} onOpenChange={open => { if (!open && !busy) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>删除所选 {deleting?.length ?? 0} 篇文章</DialogTitle><DialogDescription>文章将从文章库及后续整号下载、导出中移除。已有文件和任务记录保留。未结束下载任务中的文章需先取消相关任务。</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setDeleting(null)}>取消</Button><Button variant="destructive" disabled={busy} onClick={() => run(async () => { const removed = await deleteArticles(deleting!); setSelected(old => old.filter(id => !deleting!.includes(id))); setDeleting(null); toast.success(`已删除 ${removed} 篇文章`); })}>确认删除</Button></div></DialogContent></Dialog>
   </Page>;
@@ -231,6 +262,9 @@ function PolicyForm({ policy }: { policy: Policy }) {
       { key: "retries", title: "文章/图片重试次数" },
       { key: "body_daily_budget", title: "近24小时文章下载预算", min: 1 },
     ] },
+    { title: "互动和评论", description: "获取互动统计、评论及回复共用独立发送间隔，包含获取文章令牌的请求；与文章下载共用近24小时文章预算。", fields: [
+      { key: "interaction_gap_ms", title: "互动和评论请求间隔（秒）", seconds: true },
+    ] },
     { title: "异常处理", description: "调整设置不会清除已经进行的请求或正在生效的冷却。", fields: [
       { key: "cooldown_seconds", title: "异常访问冷却（秒）", min: 1 },
     ] },
@@ -239,7 +273,7 @@ function PolicyForm({ policy }: { policy: Policy }) {
     <p className="rounded-lg border border-warning/40 p-3 text-sm">系统默认值仅作为初始配置，并非最佳配置或安全阈值。可根据实际需求、网络环境和请求记录自行调整并保存。</p>
     <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">抓取频率与预算说明</summary><div className="prose prose-sm mt-3 max-w-none text-sm dark:prose-invert prose-h2:text-base prose-strong:text-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{requestPolicyGuide.replace(/^# .*\n/, "").trim()}</ReactMarkdown></div></details>
     {groups.map(group => <fieldset key={group.title} className="space-y-4 rounded-lg border p-4"><legend className="px-2 font-medium">{group.title}</legend><p className="text-sm text-muted-foreground">{group.description}</p><div className="grid gap-4 md:grid-cols-3">{group.fields.map(f => <div className="space-y-1" key={f.key}><Label htmlFor={`policy-${f.key}`}>{f.title}</Label><Input id={`policy-${f.key}`} type="number" min={f.min ?? 0} step={f.seconds ? 0.001 : 1} value={draft[f.key] / (f.seconds ? 1000 : 1)} onChange={e => setDraft({ ...draft, [f.key]: Math.round(Number(e.target.value) * (f.seconds ? 1000 : 1)) })} /></div>)}</div></fieldset>)}
-    <Button disabled={busy} onClick={() => run(async () => { setDraft(await savePolicy(draft)); }, "策略已保存，将从下一次尚未发送的请求生效")}>保存抓取策略</Button><p className="text-xs text-muted-foreground">列表与文章预算分别计算；文章预算包含推送文章解析、文章下载、跳转、失败和重试，不包含图片请求。间隔为 0 表示不增加额外等待。</p>
+    <Button disabled={busy} onClick={() => run(async () => { setDraft(await savePolicy(draft)); }, "策略已保存，将从下一次尚未发送的请求生效")}>保存抓取策略</Button><p className="text-xs text-muted-foreground">列表与文章预算分别计算；文章预算包含推送文章解析、文章下载、互动和评论、跳转、失败和重试，不包含图片请求。间隔为 0 表示不增加额外等待。</p>
   </div>;
 }
 
@@ -250,10 +284,10 @@ export function WorkbenchRate() {
   const filtered=listing.data?.items||[];useServerPage(listing.data?.total,pageSize,page,setPage);
   return <Page title="限流配置" description="按实际发送时间分析请求频率与失败证据。策略可调整，实验、对照、重建和重试均纳入记账。">
     <div className="grid gap-4 md:grid-cols-4">{[["近24小时列表请求", data?.list_calls_24h ?? 0], ["近24小时文章请求", data?.article_calls_24h ?? 0], ["展示样本失败/异常", requests.filter(r => !["ok", "pending", "redirect"].includes(r.outcome)).length], ["当前策略版本", data?.policy.version ?? "—"]].map(([k, v]) => <Card key={k}><CardContent className="pt-5"><p className="text-xs text-muted-foreground">{k}</p><p className="mt-2 text-2xl font-semibold">{v}</p></CardContent></Card>)}</div>
-    {data && <Panel title="抓取频率与预算" description="列表与文章分开配置，文章解析与下载共享文章请求间隔及预算。"><PolicyForm key={data.policy.version} policy={data.policy} /></Panel>}
+    {data && <Panel title="抓取频率与预算" description="列表、文章下载、互动和评论分别配置间隔。"><PolicyForm key={data.policy.version} policy={data.policy} /></Panel>}
     <Panel title="实际请求明细" description="按近24小时完整请求账本分页；导出包含全部已保存请求。原生请求与其镜像日志只计算一次。">
-      <div className="flex flex-wrap justify-between gap-2"><select aria-label="筛选请求类别" className={selectClass} value={category} onChange={e => {setCategory(e.target.value);setPage(0);}}><option value="">全部请求</option>{["list", "body", "image", "webpage"].map(c => <option key={c} value={c}>{label(c)}</option>)}</select><Button variant="outline" disabled={busy} onClick={() => run(async () => revealInFolder(await exportRequests()))}>导出请求记录</Button></div>
-      <Table><TableHeader><TableRow>{["时间", "类别 / 用途", "结果", "实际间隔", "耗时"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{filtered.map(r => <TableRow key={r.id}><TableCell className="whitespace-nowrap text-xs">{dt(r.started_at)}</TableCell><TableCell>{label(r.category)} · {label(r.purpose)}<p className="text-xs text-muted-foreground">{r.owner_kind === "push_monitor" ? "推送监测" : r.owner_kind === "discovery" ? "主页识别" : r.owner_kind === "experiment" ? "实验" : r.owner_kind === "native" ? "首页识别" : "任务"} #{r.owner_id}</p></TableCell><TableCell><State value={r.outcome} />{r.detail.business_ret != null && <p className="mt-1 font-mono text-xs">业务码 {String(r.detail.business_ret)}</p>}</TableCell><TableCell>{r.gap_ms == null ? "—" : `${(r.gap_ms / 1000).toFixed(3)}s`}</TableCell><TableCell>{r.finished_at ? `${Math.round((r.finished_at - r.started_at) * 1000)}ms` : "—"}</TableCell></TableRow>)}</TableBody></Table>{!filtered.length && <Empty>尚无请求记录。</Empty>}
+      <div className="flex flex-wrap justify-between gap-2"><select aria-label="筛选请求类别" className={selectClass} value={category} onChange={e => {setCategory(e.target.value);setPage(0);}}><option value="">全部请求</option>{["list", "body", "image", "webpage", "interaction"].map(c => <option key={c} value={c}>{label(c)}</option>)}</select><Button variant="outline" disabled={busy} onClick={() => run(async () => revealInFolder(await exportRequests()))}>导出请求记录</Button></div>
+      <Table><TableHeader><TableRow>{["时间", "类别 / 用途", "结果", "实际间隔", "耗时"].map(h => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{filtered.map(r => <TableRow key={r.id}><TableCell className="whitespace-nowrap text-xs">{dt(r.started_at)}</TableCell><TableCell>{label(r.category)} · {label(r.purpose)}<p className="text-xs text-muted-foreground">{r.owner_kind === "push_monitor" ? "推送监测" : r.owner_kind === "discovery" ? "主页识别" : r.owner_kind === "experiment" ? "实验" : r.owner_kind === "native" ? "首页识别" : r.owner_kind === "article" ? "文章" : "任务"} #{r.owner_id}</p></TableCell><TableCell><State value={r.outcome} />{r.detail.business_ret != null && <p className="mt-1 font-mono text-xs">业务码 {String(r.detail.business_ret)}</p>}</TableCell><TableCell>{r.gap_ms == null ? "—" : `${(r.gap_ms / 1000).toFixed(3)}s`}</TableCell><TableCell>{r.finished_at ? `${Math.round((r.finished_at - r.started_at) * 1000)}ms` : "—"}</TableCell></TableRow>)}</TableBody></Table>{!filtered.length && <Empty>尚无请求记录。</Empty>}
       {listing.error && <p role="alert" className="text-sm text-destructive">请求读取失败：{String(listing.error)}</p>}
       <Pager label="请求明细" page={page} total={listing.data?.total??0} pageSize={pageSize} busy={listing.isFetching} onPage={setPage} onPageSize={size=>{setPageSize(size);setPage(0);}} />
     </Panel>

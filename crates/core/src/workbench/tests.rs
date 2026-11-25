@@ -368,6 +368,98 @@ fn shared_budget_counts_native_once_and_includes_experiment_controls() {
     assert_eq!(s.wb_list_window(0.).unwrap().0, 2);
 }
 #[test]
+fn interaction_rate_is_shared_by_both_operations_and_independent_of_downloads() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .wb_set_policy(Policy {
+            body_workers: 1,
+            body_gap_ms: 5000,
+            interaction_gap_ms: 2000,
+            ..Default::default()
+        })
+        .unwrap();
+    let interaction = store
+        .wb_request_permit("interaction", "article_interactions", 1, "B", 100.)
+        .unwrap()
+        .request_id
+        .unwrap();
+    store
+        .wb_request_finish(&interaction, "ok", serde_json::json!({}), 100.)
+        .unwrap();
+    let body = store
+        .wb_request_permit("body", "archive", 2, "B", 100.)
+        .unwrap()
+        .request_id
+        .unwrap();
+    store
+        .wb_request_finish(&body, "ok", serde_json::json!({}), 100.)
+        .unwrap();
+    let waiting = store
+        .wb_request_permit("interaction", "article_comments", 1, "B", 101.)
+        .unwrap();
+    assert!(waiting.request_id.is_none());
+    assert_eq!(waiting.next_at, 102.);
+    let mut policy = store.wb_policy().unwrap();
+    policy.interaction_gap_ms = 500;
+    store.wb_set_policy(policy.clone()).unwrap();
+    assert!(store
+        .wb_request_permit("interaction", "article_comments", 1, "B", 101.)
+        .unwrap()
+        .request_id
+        .is_some());
+    assert!(store
+        .wb_request_permit("body", "archive", 2, "B", 101.)
+        .unwrap()
+        .request_id
+        .is_none());
+    policy.body_daily_budget = 3;
+    store.wb_set_policy(policy).unwrap();
+    assert!(store
+        .wb_request_permit("interaction", "article_comments", 1, "B", 110.)
+        .unwrap()
+        .reason
+        .unwrap()
+        .contains("预算"));
+    assert!(store
+        .wb_request_permit("webpage", "article_comments", 1, "B", 110.)
+        .is_err());
+    let page = store.wb_request_page("interaction", 0., 10, 0).unwrap();
+    assert_eq!(page.total, 2);
+    assert!(page
+        .items
+        .iter()
+        .all(|event| event.category == "interaction"));
+}
+
+#[test]
+fn default_intervals_and_legacy_policy_deserialization() {
+    let p = Policy::default();
+    assert_eq!(
+        (p.list_min_ms, p.list_max_ms, p.body_gap_ms, p.image_gap_ms),
+        (3000, 5000, 200, 200)
+    );
+    assert_eq!(p.interaction_gap_ms, 1000);
+    let legacy: Policy = serde_json::from_value(
+        serde_json::json!({"list_min_ms":90000,"list_max_ms":120000,"body_gap_ms":1500}),
+    )
+    .unwrap();
+    assert_eq!(
+        (
+            legacy.list_min_ms,
+            legacy.body_gap_ms,
+            legacy.interaction_gap_ms
+        ),
+        (90000, 1500, 1000)
+    );
+    assert!(Policy {
+        interaction_gap_ms: 86400001,
+        ..p
+    }
+    .validate()
+    .is_err());
+}
+
+#[test]
 fn live_policy_change_applies_to_next_unsent_request_below_sixty_seconds() {
     let s = Store::open_in_memory().unwrap();
     let mut p = Policy {
@@ -1212,6 +1304,38 @@ fn deleting_selected_articles_is_atomic_and_does_not_race_unfinished_downloads()
     assert_eq!(queue.total, 2);
     assert_eq!(queue.cancelled, 1);
     assert_eq!(queue.pending, 1);
+}
+
+#[test]
+fn restoring_selected_articles_is_atomic_and_preserves_saved_data() {
+    let store = Store::open_in_memory().unwrap();
+    register(&store, "RESTORE");
+    let ids = store
+        .article_selection_ids(Some("RESTORE"), None, None)
+        .unwrap();
+    store.wb_delete_articles(ids.clone()).unwrap();
+    let before = store.get_article_md(ids[0]).unwrap().unwrap();
+    assert!(store.wb_restore_articles(vec![ids[0], 999999]).is_err());
+    assert!(store
+        .article_selection_ids(Some("RESTORE"), None, None)
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.wb_restore_articles(vec![ids[0], ids[0]]).unwrap(), 1);
+    let after = store.get_article_md(ids[0]).unwrap().unwrap();
+    assert_eq!(after.0.is_deleted, 0);
+    assert_eq!(after.0.title, before.0.title);
+    assert_eq!(after.1, before.1);
+    assert_eq!(
+        store.get_article_md(ids[1]).unwrap().unwrap().0.is_deleted,
+        1
+    );
+    assert_eq!(store.wb_source_counts().unwrap()["RESTORE"], 1);
+    assert_eq!(
+        store
+            .article_selection_ids(Some("RESTORE"), None, None)
+            .unwrap(),
+        vec![ids[0]]
+    );
 }
 
 #[test]

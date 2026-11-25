@@ -134,6 +134,32 @@ impl Store {
             for mut task in tasks {
                 let associated = task.biz.as_deref() == Some(biz);
                 let mut affected = associated;
+                if crate::workbench::collection::is_collection(&task.kind) {
+                    let original: Vec<i64> =
+                        serde_json::from_value(task.target["article_ids"].clone())
+                            .unwrap_or_default();
+                    let remaining: Vec<i64> = original
+                        .iter()
+                        .copied()
+                        .filter(|id| !ids.contains(id))
+                        .collect();
+                    if remaining.len() != original.len() {
+                        task.progress
+                            .collection
+                            .get_or_insert_with(Default::default)
+                            .epoch += 1;
+                        task.target["article_ids"] = json!(remaining);
+                        task.progress.finished_ids.retain(|id| !ids.contains(id));
+                        task.progress.completed = task.progress.finished_ids.len() as u32;
+                        if !remaining.is_empty() {
+                            task.biz = None;
+                            task.updated_at = ts;
+                            put(&tx, "wb_tasks", task.id, &task)?;
+                            continue;
+                        }
+                        affected = true;
+                    }
+                }
                 if task.kind == "archive" {
                     let original: Vec<i64> =
                         serde_json::from_value(task.target["article_ids"].clone())
@@ -219,6 +245,7 @@ impl Store {
                 "DELETE FROM comments WHERE article_id IN (SELECT id FROM articles WHERE biz=?)",
                 [biz],
             )?;
+            tx.execute("DELETE FROM wb_article_collection WHERE article_id IN (SELECT id FROM articles WHERE biz=?)",[biz])?;
             receipt.deleted_articles = tx.execute("DELETE FROM articles WHERE biz=?", [biz])?;
             tx.execute("DELETE FROM wb_coverage WHERE biz=?", [biz])?;
             tx.execute("DELETE FROM wb_sources WHERE biz=?", [biz])?;

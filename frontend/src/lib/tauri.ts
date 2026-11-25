@@ -163,7 +163,19 @@ export interface SystemStatus {
 }
 
 /** 「公众号文章」列表行（后端 ArticleItem）。 */
+export interface ArticleInteractions {
+  read_count: number | null;
+  read_display: string | null;
+  like_count: number | null;
+  watching_count: number | null;
+  share_count: number | null;
+  comment_count: number | null;
+}
+
 export interface ArticleItem {
+  collection: { interactions: boolean; comments: boolean; comments_complete: boolean };
+  is_deleted: boolean;
+  interactions: ArticleInteractions;
   has_body: boolean;
   id: number;
   biz: string;
@@ -934,8 +946,8 @@ export const deleteJob = (id: number) => invoke<boolean>("delete_job", { id });
 /** 一键清空全部已结束的任务记录（不可恢复；进行中的保留）。返回删掉的条数。 */
 export const clearJobs = () => invoke<number>("clear_jobs");
 
-export const listArticles = (biz?: string, limit?: number, offset?: number, title?: string, downloaded?: boolean) =>
-  invoke<ArticlePage>("list_articles", { biz: biz ?? null, limit, offset, title: title ?? null, downloaded: downloaded ?? null });
+export const listArticles = (biz?: string, limit?: number, offset?: number, title?: string, downloaded?: boolean, includeDeleted = false) =>
+  invoke<ArticlePage>("list_articles", { biz: biz ?? null, limit, offset, title: title ?? null, downloaded: downloaded ?? null, includeDeleted });
 export const articleSelectionIds = (biz?: string, title?: string, downloaded?: boolean) =>
   invoke<number[]>("article_selection_ids", { biz: biz ?? null, title: title ?? null, downloaded: downloaded ?? null });
 export const getArticleDetail = (id: number) =>

@@ -11,6 +11,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+pub(crate) mod collection;
+pub use collection::{CollectionReceipt, CollectionStatus};
 mod home_sync;
 mod pagination;
 mod request_slots;
@@ -23,13 +25,14 @@ CREATE TABLE IF NOT EXISTS wb_sources(biz TEXT PRIMARY KEY,document TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS wb_sessions(id TEXT PRIMARY KEY,biz TEXT NOT NULL,path TEXT NOT NULL,config TEXT NOT NULL,created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_cursors(id INTEGER PRIMARY KEY,biz TEXT NOT NULL,session_id TEXT NOT NULL,parent_id INTEGER,hash TEXT NOT NULL,evidence_path TEXT NOT NULL,observed_at REAL NOT NULL,last_success_at REAL,state TEXT NOT NULL DEFAULT 'unverified',UNIQUE(biz,session_id,hash));
 CREATE TABLE IF NOT EXISTS wb_coverage(biz TEXT NOT NULL,mid TEXT NOT NULL,idx INTEGER NOT NULL,PRIMARY KEY(biz,mid,idx));
+CREATE TABLE IF NOT EXISTS wb_article_collection(article_id INTEGER PRIMARY KEY,interactions_at REAL);
 CREATE TABLE IF NOT EXISTS wb_tasks(id INTEGER PRIMARY KEY,document TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS wb_task_state ON wb_tasks(json_extract(document,'$.state'),json_extract(document,'$.kind'));
 CREATE TABLE IF NOT EXISTS wb_experiments(id INTEGER PRIMARY KEY,document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_probes(id INTEGER PRIMARY KEY,experiment_id INTEGER NOT NULL,document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_requests(id TEXT PRIMARY KEY,document TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS wb_request_time ON wb_requests(json_extract(document,'$.started_at'));
-CREATE INDEX IF NOT EXISTS wb_article_request_time ON wb_requests(json_extract(document,'$.started_at')) WHERE json_extract(document,'$.category') IN ('body','webpage');
+CREATE INDEX IF NOT EXISTS wb_article_budget_time ON wb_requests(json_extract(document,'$.started_at')) WHERE json_extract(document,'$.category') IN ('body','webpage','interaction');
 CREATE TABLE IF NOT EXISTS wb_article_slots(slot INTEGER PRIMARY KEY,request_id TEXT,finished_at REAL);
 CREATE TABLE IF NOT EXISTS wb_policy(id INTEGER PRIMARY KEY CHECK(id=1),document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS wb_policy_history(version INTEGER PRIMARY KEY,changed_at REAL NOT NULL,document TEXT NOT NULL);
@@ -946,6 +949,38 @@ impl Store {
         tx.commit()?;
         Ok(ids.len())
     }
+    /// Restore only selected soft-deleted rows; keep bodies, comments and other articles intact.
+    pub fn wb_restore_articles(&self, mut ids: Vec<i64>) -> Result<usize> {
+        ids.sort_unstable();
+        ids.dedup();
+        ensure!(
+            !ids.is_empty() && ids.len() <= 100000,
+            "请选择一至十万篇文章"
+        );
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        for id in &ids {
+            let deleted: Option<i64> = tx
+                .query_row("SELECT is_deleted FROM articles WHERE id=?", [id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            ensure!(deleted == Some(1), "文章不存在或已经恢复，请刷新后重试");
+        }
+        for id in &ids {
+            tx.execute("UPDATE articles SET is_deleted=0 WHERE id=?", [id])?;
+        }
+        tx.execute("UPDATE wb_sources SET document=json_set(document,'$.article_count',(SELECT COUNT(*) FROM articles WHERE articles.biz=wb_sources.biz AND is_deleted=0))", [])?;
+        super::system_logs::write(
+            &tx,
+            "storage",
+            "info",
+            "用户所选文章已恢复",
+            json!({"count":ids.len()}),
+        )?;
+        tx.commit()?;
+        Ok(ids.len())
+    }
     pub fn wb_task_state(&self, id: i64, state: &str, reason: Option<&str>) -> Result<()> {
         ensure!(
             [
@@ -987,6 +1022,12 @@ impl Store {
                     SESSION_RECOVERY_HINT
                 );
             }
+        }
+        if crate::workbench::collection::is_collection(&task.kind) {
+            task.progress
+                .collection
+                .get_or_insert_with(Default::default)
+                .epoch += 1;
         }
         task.state = state.into();
         if let Some(recovery) = &mut task.progress.session_recovery {
@@ -1546,11 +1587,14 @@ impl Store {
         ts: f64,
     ) -> Result<Permit> {
         ensure!(
-            ["list", "body", "image", "webpage"].contains(&category),
+            ["list", "body", "image", "webpage", "interaction"].contains(&category),
             "未知请求类别"
         );
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if category == "interaction" {
+            collection::guard(&tx, owner)?;
+        }
         let p: Policy = tx
             .query_row("SELECT document FROM wb_policy WHERE id=1", [], |r| {
                 decode(r, 0)
@@ -1559,8 +1603,10 @@ impl Store {
             .unwrap_or_default();
         let push = purpose == crate::workbench::push_monitor::PURPOSE;
         ensure!(
-            push == (category == crate::workbench::push_monitor::CATEGORY),
-            "网页解析请求类别与用途不匹配"
+            push == (category == crate::workbench::push_monitor::CATEGORY)
+                && matches!(purpose, "article_comments" | "article_interactions")
+                    == (category == "interaction"),
+            "请求类别与用途不匹配"
         );
         if push {
             let text: String =
@@ -1577,6 +1623,8 @@ impl Store {
         // 包含旧版 body/push_metadata 和新版 webpage，历史请求不用重写。
         let previous: Option<f64> = if article {
             tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category') IN ('body','webpage')", [], |r| r.get(0))?
+        } else if category == "interaction" {
+            tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.purpose') IN ('article_comments','article_interactions')", [], |r| r.get(0))?
         } else {
             tx.query_row("SELECT MAX(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category')=?", [category], |r| r.get(0))?
         };
@@ -1592,6 +1640,7 @@ impl Store {
         let gap = match category {
             "list" => crate::rng::between(p.list_min_ms, p.list_max_ms),
             "body" | "webpage" => p.body_gap_ms,
+            "interaction" => p.interaction_gap_ms,
             _ => p.image_gap_ms,
         };
         let (slot, mut next) = if article {
@@ -1610,7 +1659,7 @@ impl Store {
             }
             .to_string()
         });
-        if article {
+        if article || category == "interaction" {
             let (count, oldest) = article_window(&tx, ts - 86400.)?;
             if count >= p.body_daily_budget {
                 next = next.max(oldest.unwrap_or(ts) + 86400. + 0.01);
@@ -1645,6 +1694,8 @@ impl Store {
             owner_id: owner,
             owner_kind: if purpose.starts_with("cursor_") {
                 "experiment"
+            } else if matches!(purpose, "article_comments" | "article_interactions") {
+                "article"
             } else if purpose == crate::workbench::push_monitor::PURPOSE {
                 "push_monitor"
             } else {
@@ -2040,7 +2091,7 @@ pub(super) fn article_window(
     conn: &rusqlite::Connection,
     since: f64,
 ) -> Result<(i64, Option<f64>)> {
-    Ok(conn.query_row("SELECT COUNT(*),MIN(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category') IN ('body','webpage') AND json_extract(document,'$.started_at')>?",[since],|r|Ok((r.get(0)?,r.get(1)?)))?)
+    Ok(conn.query_row("SELECT COUNT(*),MIN(json_extract(document,'$.started_at')) FROM wb_requests WHERE json_extract(document,'$.category') IN ('body','webpage','interaction') AND json_extract(document,'$.started_at')>?",[since],|r|Ok((r.get(0)?,r.get(1)?)))?)
 }
 
 #[cfg(test)]

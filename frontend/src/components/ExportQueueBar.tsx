@@ -1,19 +1,20 @@
 /** 与文章下载共用底栏进度样式；仅在实际导出期间显示。 */
 import { useState, useSyncExternalStore } from "react";
+import { FileOutput } from "lucide-react";
 import { QueueProgressTrigger } from "@/components/QueueProgressTrigger";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { articleExportProgress, type ExportQueueProgress } from "@/lib/export-progress";
 
-export function ExportQueueBar() {
+export function ExportQueueBar({ compact = false }: { compact?: boolean }) {
   const queue = useSyncExternalStore(articleExportProgress.subscribe, articleExportProgress.getSnapshot);
-  return queue ? <ExportQueueProgressView queue={queue} /> : null;
+  return queue ? <ExportQueueProgressView queue={queue} compact={compact} /> : null;
 }
 
-function ExportQueueProgressView({ queue }: { queue: ExportQueueProgress }) {
+function ExportQueueProgressView({ queue, compact }: { queue: ExportQueueProgress; compact: boolean }) {
   const [open, setOpen] = useState(false);
   return <>
-    <QueueProgressTrigger queue={queue} label="文章导出" hint="点击查看文章导出进度" onClick={() => setOpen(true)} />
+    <QueueProgressTrigger queue={queue} label="文章导出" hint="点击查看文章导出进度" icon={FileOutput} compact={compact} onClick={() => setOpen(true)} />
     <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader>
       <DialogTitle>文章导出进度</DialogTitle>
       <DialogDescription>正在写出 Markdown、HTML 和已保存的图片，切换页面不会中断导出。</DialogDescription>

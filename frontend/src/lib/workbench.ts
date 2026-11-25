@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { articleExportProgress, type ArticleExportProgress } from "./export-progress.ts";
 export interface Policy {
   version: number; list_min_ms: number; list_max_ms: number; list_daily_budget: number;
-  body_gap_ms: number; body_daily_budget: number; image_gap_ms: number; body_workers: number; image_workers: number;
+  interaction_gap_ms: number; body_gap_ms: number; body_daily_budget: number; image_gap_ms: number; body_workers: number; image_workers: number;
   retries: number; rebuild_limit: number; cooldown_until: number; cooldown_seconds: number;
 }
 export interface Source {
@@ -16,7 +16,9 @@ export interface CursorRecord {
   id: number; biz: string; session_id: string; parent_id: number | null; source_page: number | null; hash: string;
   observed_at: number; last_success_at: number | null; state: string;
 }
+export interface CollectionProgress { epoch: number; article_id: number | null; title: string; pages: number; reply_pages: number; added: number; updated: number; unchanged: number }
 export interface Progress {
+  collection?: CollectionProgress | null;
   session_recovery?: { discovery_id: number; requested_at: number; previous_session_id: string; phase: string } | null;
   blocked_session_id?: string | null;
   received_articles?: number | null;
@@ -24,8 +26,8 @@ export interface Progress {
   rebuilds: number; rebuilding: boolean; finished_ids: number[];
 }
 export interface Task {
-  id: number; kind: "history" | "home" | "archive"; biz: string | null; state: string;
-  target: { count?: number; cutoff_at?: number; pages?: number; cursor_id?: number; article_ids?: number[]; download_only?: boolean };
+  id: number; kind: "history" | "home" | "archive" | "interactions" | "comments"; biz: string | null; state: string;
+  target: { count?: number; cutoff_at?: number; pages?: number; cursor_id?: number; article_ids?: number[]; download_only?: boolean; refresh?: boolean };
   progress: Progress; reason: string | null; next_action_at: number; created_at: number;
   updated_at: number; result_path: string | null;
 }
@@ -53,7 +55,7 @@ export interface Discovery {
 }
 export interface QueueProgress { task_count: number; completed: number; total: number | null }
 export interface Snapshot {
-  active_queues: { download: QueueProgress; history: QueueProgress };
+  active_queues: { download: QueueProgress; history: QueueProgress; interactions: QueueProgress; comments: QueueProgress };
   download_queue: { task_count: number; total: number; completed: number; skipped: number; failed: number; cancelled: number; pending: number };
   discovery: Discovery | null;
   sources: Source[]; cursors: CursorRecord[]; tasks: Task[]; experiments: Experiment[];
@@ -97,6 +99,7 @@ export const recoverSession = (id: number) => invoke<void>("workbench_recover_se
 
 export const downloadArticles = (articleIds: number[]) => invoke<DownloadReceipt>("workbench_download_articles", { articleIds });
 export const exportArticles = (articleIds: number[]) => exportWithProgress({ articleIds });
+export const restoreArticles = (articleIds: number[]) => invoke<number>("workbench_restore_articles", { articleIds });
 export const deleteArticles = (articleIds: number[]) => invoke<number>("workbench_delete_articles", { articleIds });
 export interface SourceDeletion { deleted_articles: number; cancelled_tasks: number; cancelled_experiments: number; cleanup_pending: number }
 export const deleteSource = (biz: string) => invoke<SourceDeletion>("workbench_delete_source", { biz });
@@ -118,3 +121,43 @@ export const logUiError = (kind: "uncaught_error" | "unhandled_rejection" | "act
 export const exportExperiment = (id: number) => invoke<{ path: string; count: number } | null>("workbench_export_experiment", { id });
 
 export const articleBodyStates = (articleIds: number[]) => invoke<Record<number,boolean>>("workbench_article_body_states", { articleIds });
+
+export interface ArticleComment {
+  content_parts?: { text: string; url: string | null }[];
+  id: string;
+  author: string;
+  content: string;
+  images?: string[];
+  likes: number | null;
+  created_at: number | null;
+  is_author: boolean;
+  reply_to: string | null;
+  replies: ArticleComment[];
+}
+
+export interface ArticleCommentsPage {
+  items: ArticleComment[];
+  next_cursor: number | null;
+  cached_count: number;
+  comment_count: number | null;
+  can_fetch_more: boolean;
+}
+
+export const articleComments = (articleId: number, after: number | null) =>
+  invoke<ArticleCommentsPage>("workbench_article_comments", { articleId, after });
+
+export const fetchArticleComments = (articleId: number) =>
+  createCollectionTask("comments", {ids:[articleId]}, true);
+
+export const importRenderedComments = (articleId: number) =>
+  invoke<number>("workbench_import_rendered_comments", { articleId });
+
+export type ArticleCollection = "interactions" | "comments";
+
+export const fetchArticleInteractions = (articleId: number) =>
+  createCollectionTask("interactions", {ids:[articleId]}, true);
+
+export interface CollectionReceipt { task_id: number | null; requested: number; queued: number; skipped: number; already_queued: number }
+export type CollectionTarget = {biz:string} | {ids:number[]};
+export const createCollectionTask = (kind: ArticleCollection, target: CollectionTarget, refresh: boolean) => invoke<CollectionReceipt>("workbench_collection_create", {kind, refresh, biz: "biz" in target ? target.biz : null, articleIds: "ids" in target ? target.ids : null});
+export const articleCollectionTask = (articleId: number, kind: ArticleCollection) => invoke<Task | null>("workbench_article_collection_task", {articleId,kind});

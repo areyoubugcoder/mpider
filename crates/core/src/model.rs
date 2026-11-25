@@ -396,6 +396,7 @@ pub struct ArticleFields {
 /// 文章列表行（`list_articles` 返回的精简投影，对齐 Python 的列裁剪）。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ArticleRow {
+    pub interactions: crate::workbench::interactions::ArticleInteractions,
     /// 本地存在非空 Markdown 正文，独立于旧详情状态。
     #[serde(default)]
     pub has_body: bool,

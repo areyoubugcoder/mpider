@@ -984,7 +984,10 @@ fn seed_server_status() -> mpider_core::seedserver::SeedServerStatus {
 /// 「公众号文章」页的一行（在 ArticleRow 基础上补公众号昵称，前端免二次查询）。
 #[derive(Serialize)]
 struct ArticleItem {
+    collection: mpider_core::store::CollectionStatus,
     has_body: bool,
+    is_deleted: bool,
+    interactions: mpider_core::workbench::interactions::ArticleInteractions,
     id: i64,
     biz: String,
     /// 所属公众号昵称（accounts 表；没有昵称时为 None，前端显示 biz）。
@@ -1015,21 +1018,26 @@ fn list_articles(
     offset: Option<i64>,
     title: Option<String>,
     downloaded: Option<bool>,
+    include_deleted: Option<bool>,
 ) -> Result<ArticlePage, String> {
+    let filter = mpider_core::store::ArticleFilter {
+        biz: biz.as_deref(),
+        title: title.as_deref(),
+        downloaded,
+        include_deleted: include_deleted.unwrap_or(false),
+    };
     let rows = state
         .store
         .list_articles_filtered(
-            biz.as_deref(),
+            filter,
             limit.unwrap_or(200).clamp(1, 1000),
             offset.unwrap_or(0),
             false,
-            title.as_deref(),
-            downloaded,
         )
         .map_err(|e| e.to_string())?;
     let total = state
         .store
-        .count_articles_filtered(biz.as_deref(), title.as_deref(), downloaded)
+        .count_articles_filtered(filter)
         .map_err(|e| e.to_string())?;
     let nick: std::collections::HashMap<String, Option<String>> = state
         .store
@@ -1038,10 +1046,17 @@ fn list_articles(
         .into_iter()
         .map(|a| (a.biz, a.nickname))
         .collect();
+    let states = state
+        .store
+        .wb_collection_statuses(&rows.iter().map(|r| r.id).collect::<Vec<_>>())
+        .map_err(|e| e.to_string())?;
     let items = rows
         .into_iter()
         .map(|r| ArticleItem {
+            collection: states.get(&r.id).cloned().unwrap_or_default(),
             has_body: r.has_body,
+            is_deleted: r.is_deleted != 0,
+            interactions: r.interactions,
             account: nick.get(&r.biz).cloned().flatten(),
             id: r.id,
             biz: r.biz,
@@ -2628,6 +2643,12 @@ pub fn run() {
             workbench::workbench_push_queue_start,
             workbench::workbench_push_queue_stop,
             workbench::workbench_article_body_states,
+            workbench::workbench_fetch_article_comments,
+            workbench::workbench_collection_create,
+            workbench::workbench_article_collection_task,
+            workbench::workbench_fetch_article_interactions,
+            workbench::workbench_import_rendered_comments,
+            workbench::workbench_article_comments,
             workbench::workbench_source_page,
             workbench::workbench_task_page,
             workbench::workbench_request_page,
@@ -2648,6 +2669,7 @@ pub fn run() {
             workbench::workbench_download_articles,
             workbench::workbench_export_articles,
             workbench::workbench_delete_articles,
+            workbench::workbench_restore_articles,
             workbench::workbench_delete_source,
             workbench::workbench_export_source,
             workbench::workbench_task_action,

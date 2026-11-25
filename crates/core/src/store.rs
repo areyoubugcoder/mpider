@@ -26,6 +26,16 @@ mod native;
 mod push_monitor;
 pub mod system_logs;
 mod workbench;
+pub use workbench::{CollectionReceipt, CollectionStatus};
+
+/// Article-library visibility affects reads only; collection selections exclude deleted rows.
+#[derive(Clone, Copy, Default)]
+pub struct ArticleFilter<'a> {
+    pub biz: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub downloaded: Option<bool>,
+    pub include_deleted: bool,
+}
 
 /// 限流分析日志（`list_call_log` / `run_log` / `cooldown_log`）保留时长：30 天。
 pub const RATELIMIT_LOG_RETENTION_SECS: i64 = 30 * 86_400;
@@ -114,6 +124,9 @@ CREATE TABLE IF NOT EXISTS articles (
     old_like_num INTEGER,
     like_num     INTEGER,
     comment_count INTEGER,
+    interaction_share_count INTEGER,
+    interaction_read_display TEXT,
+    comment_next_offset INTEGER NOT NULL DEFAULT 0,
     is_deleted   INTEGER NOT NULL DEFAULT 0,
     detail_done  INTEGER NOT NULL DEFAULT 0,
     detail_attempts INTEGER NOT NULL DEFAULT 0,
@@ -135,6 +148,7 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at   REAL,
     UNIQUE (article_id, content_id)
 );
+CREATE INDEX IF NOT EXISTS idx_comments_article_page ON comments(article_id, id);
 
 CREATE TABLE IF NOT EXISTS tasks (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -404,6 +418,9 @@ impl Store {
             "ALTER TABLE accounts ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_attempts INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE articles ADD COLUMN detail_error TEXT",
+            "ALTER TABLE articles ADD COLUMN interaction_share_count INTEGER",
+            "ALTER TABLE articles ADD COLUMN interaction_read_display TEXT",
+            "ALTER TABLE articles ADD COLUMN comment_next_offset INTEGER NOT NULL DEFAULT 0",
             // 凭证热数据列（有效期 / 失效 / 使用统计）
             "ALTER TABLE credentials ADD COLUMN expires_at REAL",
             "ALTER TABLE credentials ADD COLUMN invalidated_at REAL",
@@ -2093,23 +2110,29 @@ impl Store {
         offset: i64,
         only_detail: bool,
     ) -> Result<Vec<ArticleRow>> {
-        self.list_articles_filtered(biz, limit, offset, only_detail, None, None)
+        self.list_articles_filtered(
+            ArticleFilter {
+                biz,
+                ..Default::default()
+            },
+            limit,
+            offset,
+            only_detail,
+        )
     }
 
     pub fn list_articles_filtered(
         &self,
-        biz: Option<&str>,
+        filter: ArticleFilter<'_>,
         limit: i64,
         offset: i64,
         only_detail: bool,
-        title: Option<&str>,
-        downloaded: Option<bool>,
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0 FROM articles WHERE is_deleted=0",
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE 1=1",
         );
-        let (filter, mut args) = Self::article_filter(biz, title, downloaded);
+        let (filter, mut args) = Self::article_filter(filter);
         sql.push_str(&filter);
         if only_detail {
             sql.push_str(" AND detail_done=1");
@@ -2137,6 +2160,7 @@ impl Store {
                 is_deleted: r.get(10)?,
                 detail_error: r.get(11)?,
                 has_body: r.get(12)?,
+                interactions: Self::read_article_interactions(r)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -2152,7 +2176,7 @@ impl Store {
     ) -> Result<Vec<ArticleRow>> {
         let mut sql = String::from(
             "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0 FROM articles \
+             published_at, detail_done, is_deleted, detail_error, length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles \
              WHERE is_deleted=0 AND detail_done=0 AND content_url IS NOT NULL AND content_url != ''",
         );
         let mut args: Vec<SqlValue> = Vec::new();
@@ -2192,42 +2216,37 @@ impl Store {
                 is_deleted: r.get(10)?,
                 detail_error: r.get(11)?,
                 has_body: r.get(12)?,
+                interactions: Self::read_article_interactions(r)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    fn article_filter(
-        biz: Option<&str>,
-        title: Option<&str>,
-        downloaded: Option<bool>,
-    ) -> (String, Vec<SqlValue>) {
+    fn article_filter(filter: ArticleFilter<'_>) -> (String, Vec<SqlValue>) {
         let mut sql = String::new();
         let mut args = Vec::new();
-        if let Some(biz) = biz {
+        if !filter.include_deleted {
+            sql.push_str(" AND is_deleted=0");
+        }
+        if let Some(biz) = filter.biz {
             sql.push_str(" AND biz=?");
             args.push(SqlValue::Text(biz.into()));
         }
-        if let Some(title) = title.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(title) = filter.title.map(str::trim).filter(|s| !s.is_empty()) {
             sql.push_str(" AND instr(lower(COALESCE(title,'')),lower(?))>0");
             args.push(SqlValue::Text(title.into()));
         }
-        if let Some(downloaded) = downloaded {
+        if let Some(downloaded) = filter.downloaded {
             sql.push_str(" AND (length(trim(COALESCE(content_md,''),char(9)||char(10)||char(13)||char(32)))>0)=?");
             args.push(SqlValue::Integer(i64::from(downloaded)));
         }
         (sql, args)
     }
 
-    pub fn count_articles_filtered(
-        &self,
-        biz: Option<&str>,
-        title: Option<&str>,
-        downloaded: Option<bool>,
-    ) -> Result<i64> {
-        let (filter, args) = Self::article_filter(biz, title, downloaded);
+    pub fn count_articles_filtered(&self, filter: ArticleFilter<'_>) -> Result<i64> {
+        let (filter, args) = Self::article_filter(filter);
         Ok(self.conn().query_row(
-            &format!("SELECT COUNT(*) FROM articles WHERE is_deleted=0{filter}"),
+            &format!("SELECT COUNT(*) FROM articles WHERE 1=1{filter}"),
             params_from_iter(args),
             |r| r.get(0),
         )?)
@@ -2240,7 +2259,12 @@ impl Store {
         title: Option<&str>,
         downloaded: Option<bool>,
     ) -> Result<Vec<i64>> {
-        let (filter, args) = Self::article_filter(biz, title, downloaded);
+        let (filter, args) = Self::article_filter(ArticleFilter {
+            biz,
+            title,
+            downloaded,
+            include_deleted: false,
+        });
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!("SELECT id FROM articles WHERE is_deleted=0{filter} ORDER BY (published_at IS NULL), published_at DESC, id DESC LIMIT 100001"))?;
         let ids = stmt
@@ -2274,7 +2298,7 @@ impl Store {
         let row = conn
             .query_row(
                 "SELECT id, biz, mid, idx, title, author, digest, content_url, \
-                 published_at, detail_done, is_deleted, detail_error, content_md FROM articles WHERE id=?",
+                 published_at, detail_done, is_deleted, detail_error, content_md, read_num, old_like_num, like_num, comment_count, interaction_share_count, interaction_read_display FROM articles WHERE id=?",
                 params![id],
                 |r| {
                     Ok((
@@ -2291,6 +2315,7 @@ impl Store {
                             detail_done: r.get(9)?,
                             is_deleted: r.get(10)?,
                             detail_error: r.get(11)?,
+                            interactions: Self::read_article_interactions(r)?,
                             has_body: r.get::<_, Option<String>>(12)?.is_some_and(|md| !md.trim().is_empty()),
                         },
                         r.get::<_, Option<String>>(12)?,
@@ -2299,6 +2324,222 @@ impl Store {
             )
             .optional()?;
         Ok(row)
+    }
+
+    fn read_article_interactions(
+        row: &rusqlite::Row<'_>,
+    ) -> rusqlite::Result<crate::workbench::interactions::ArticleInteractions> {
+        Ok(crate::workbench::interactions::ArticleInteractions {
+            read_count: row.get(13)?,
+            like_count: row.get(14)?,
+            watching_count: row.get(15)?,
+            comment_count: row.get(16)?,
+            share_count: row.get(17)?,
+            read_display: row.get(18)?,
+        })
+    }
+
+    pub fn save_article_interactions(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+    ) -> Result<()> {
+        self.save_article_interactions_and_comments(id, metrics, &[])
+    }
+
+    pub fn save_article_interactions_and_comments(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+        comments: &[crate::workbench::comments::ArticleComment],
+    ) -> Result<()> {
+        self.save_article_comment_batch(id, metrics, comments, None)
+    }
+
+    pub fn save_article_comment_batch(
+        &self,
+        id: i64,
+        metrics: &crate::workbench::interactions::ArticleInteractions,
+        comments: &[crate::workbench::comments::ArticleComment],
+        cursor: Option<(i64, i64)>,
+    ) -> Result<()> {
+        use crate::workbench::comments::{merge_comments, ArticleComment};
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        workbench::collection::guard(&tx, id)?;
+        let updated = tx.execute(
+            "UPDATE articles SET read_num=CASE WHEN ?6 IS NOT NULL THEN NULL ELSE COALESCE(?1,read_num) END, old_like_num=COALESCE(?2,old_like_num),
+             like_num=COALESCE(?3,like_num), comment_count=COALESCE(?4,comment_count),
+             interaction_share_count=COALESCE(?5,interaction_share_count),
+             interaction_read_display=CASE WHEN ?1 IS NOT NULL THEN NULL
+                 ELSE COALESCE(?6,interaction_read_display) END
+             WHERE id=?7 AND is_deleted=0",
+            params![metrics.read_count, metrics.like_count, metrics.watching_count, metrics.comment_count, metrics.share_count, metrics.read_display, id],
+        )?;
+        anyhow::ensure!(updated == 1, "文章已删除");
+        if let Some((previous, next)) = cursor {
+            let changed = tx.execute(
+                "UPDATE articles SET comment_next_offset=?1 WHERE id=?2 AND comment_next_offset=?3",
+                params![next, id, previous],
+            )?;
+            anyhow::ensure!(changed == 1, "留言分页已更新，请重新加载");
+        }
+
+        for comment in comments {
+            let previous: Option<String> = tx
+                .query_row(
+                    "SELECT reply_json FROM comments WHERE article_id=?1 AND content_id=?2",
+                    params![id, comment.id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            let mut replies: Vec<ArticleComment> = previous
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<ArticleComment>(json)
+                        .ok()
+                        .map(|row| row.replies)
+                        .or_else(|| serde_json::from_str(json).ok())
+                })
+                .unwrap_or_default();
+            merge_comments(&mut replies, comment.replies.iter().cloned());
+            let mut images = comment.images.clone();
+            if let Some(prior) = previous
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<ArticleComment>(s).ok())
+            {
+                for image in prior.images {
+                    if !images.contains(&image) {
+                        images.push(image);
+                    }
+                }
+            }
+            let thread = ArticleComment {
+                replies,
+                images,
+                ..comment.clone()
+            };
+            tx.execute(
+                "INSERT INTO comments(article_id,content_id,nick_name,content,like_num,reply_json,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7)
+                 ON CONFLICT(article_id,content_id) DO UPDATE SET
+                    nick_name=COALESCE(NULLIF(excluded.nick_name,''),comments.nick_name), content=excluded.content,
+                    like_num=COALESCE(excluded.like_num,comments.like_num),
+                    reply_json=excluded.reply_json, created_at=COALESCE(excluded.created_at,comments.created_at)",
+                params![id, thread.id, thread.author, thread.content, thread.likes,
+                    serde_json::to_string(&thread)?, thread.created_at],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn resume_or_refresh_comments(&self, id: i64) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        workbench::collection::guard(&tx, id)?;
+        tx.execute("UPDATE articles SET comment_next_offset=0 WHERE id=? AND is_deleted=0 AND comment_next_offset<0",[id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn article_comment_position(&self, article_id: i64) -> Result<i64> {
+        self.conn()
+            .query_row(
+                "SELECT comment_next_offset FROM articles WHERE id=? AND is_deleted=0",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn article_comments_page(
+        &self,
+        article_id: i64,
+        after: Option<i64>,
+        limit: usize,
+    ) -> Result<crate::workbench::comments::ArticleCommentsPage> {
+        use crate::workbench::comments::{ArticleComment, ArticleCommentsPage};
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let (comment_count, can_fetch_more) = tx
+            .query_row(
+                "SELECT comment_count, comment_next_offset>=0 AND COALESCE(content_url,'')<>''
+                 FROM articles WHERE id=? AND is_deleted=0",
+                params![article_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| anyhow::anyhow!("文章不存在或已删除"))?;
+        let cached_count = tx.query_row(
+            "SELECT COUNT(*) FROM comments WHERE article_id=?",
+            params![article_id],
+            |row| row.get(0),
+        )?;
+        let limit = limit.clamp(1, 50);
+        let (items, next_cursor) = {
+            let mut stmt = tx.prepare(
+                "SELECT id,content_id,nick_name,content,like_num,reply_json,CAST(created_at AS INTEGER)
+                 FROM comments WHERE article_id=?1 AND id>?2 ORDER BY id LIMIT ?3",
+            )?;
+            let mut page = stmt
+                .query_map(params![article_id, after.unwrap_or(0), limit + 1], |row| {
+                    let row_id: i64 = row.get(0)?;
+                    let document: Option<String> = row.get(5)?;
+                    let saved: Option<ArticleComment> = document
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok());
+                    let legacy_replies = || {
+                        document
+                            .as_deref()
+                            .and_then(|json| serde_json::from_str(json).ok())
+                            .unwrap_or_default()
+                    };
+                    Ok((
+                        row_id,
+                        ArticleComment {
+                            reply_total: saved.as_ref().and_then(|s| s.reply_total),
+                            reply_max_id: saved.as_ref().and_then(|s| s.reply_max_id.clone()),
+                            content_parts: Vec::new(),
+                            id: row
+                                .get::<_, Option<String>>(1)?
+                                .unwrap_or_else(|| format!("local:{row_id}")),
+                            author: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            content: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            images: saved
+                                .as_ref()
+                                .map(|item| item.images.clone())
+                                .unwrap_or_default(),
+                            likes: row.get(4)?,
+                            created_at: row.get(6)?,
+                            is_author: saved.as_ref().is_some_and(|item| item.is_author),
+                            reply_to: saved.as_ref().and_then(|item| item.reply_to.clone()),
+                            replies: saved.map_or_else(legacy_replies, |item| item.replies),
+                        },
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let has_more = page.len() > limit;
+            page.truncate(limit);
+            let next_cursor = has_more.then(|| page.last().map(|(id, _)| *id)).flatten();
+            (
+                page.into_iter()
+                    .map(|(_, mut item)| {
+                        item.render_content();
+                        item
+                    })
+                    .collect(),
+                next_cursor,
+            )
+        };
+        Ok(ArticleCommentsPage {
+            items,
+            next_cursor,
+            cached_count,
+            comment_count,
+            can_fetch_more,
+        })
     }
 
     /// 文章计数（控制面板状态卡用）：(总数, 已采详情数, 待补数)，均不含已删除。

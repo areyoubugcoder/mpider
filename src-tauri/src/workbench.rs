@@ -75,6 +75,80 @@ pub fn workbench_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String
     state.store.wb_snapshot().map_err(|e| e.to_string())
 }
 #[tauri::command]
+pub fn workbench_article_comments(
+    state: State<'_, AppState>,
+    article_id: i64,
+    after: Option<i64>,
+) -> Result<core::comments::ArticleCommentsPage, String> {
+    state
+        .store
+        .article_comments_page(article_id, after, 20)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workbench_collection_create(
+    state: State<'_, AppState>,
+    kind: String,
+    biz: Option<String>,
+    article_ids: Option<Vec<i64>>,
+    refresh: bool,
+) -> Result<mpider_core::store::CollectionReceipt, String> {
+    state
+        .store
+        .wb_collection_enqueue(&kind, biz, article_ids.unwrap_or_default(), refresh)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workbench_article_collection_task(
+    state: State<'_, AppState>,
+    article_id: i64,
+    kind: String,
+) -> Result<Option<Task>, String> {
+    state
+        .store
+        .wb_article_collection_task(article_id, &kind)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn workbench_fetch_article_comments(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<(), String> {
+    core::comments::fetch_comments(&state.store, article_id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+pub async fn workbench_fetch_article_interactions(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<(), String> {
+    core::comments::fetch_interactions(&state.store, article_id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+pub async fn workbench_import_rendered_comments(
+    state: State<'_, AppState>,
+    article_id: i64,
+) -> Result<usize, String> {
+    #[cfg(windows)]
+    {
+        core::rendered_comments::import_clipboard(&state.store, article_id)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (state, article_id);
+        Err("从微信导入留言目前支持 Windows".into())
+    }
+}
+
+#[tauri::command]
 pub fn workbench_article_body_states(
     state: State<'_, AppState>,
     article_ids: Vec<i64>,
@@ -190,6 +264,16 @@ pub fn workbench_delete_articles(
     state
         .store
         .wb_delete_articles(article_ids)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workbench_restore_articles(
+    state: State<'_, AppState>,
+    article_ids: Vec<i64>,
+) -> Result<usize, String> {
+    state
+        .store
+        .wb_restore_articles(article_ids)
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
