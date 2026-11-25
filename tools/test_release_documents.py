@@ -16,7 +16,8 @@ class ReleaseDocumentsTests(unittest.TestCase):
                       and any(isinstance(t, ast.Name) and t.id == "PUBLIC_DOCUMENTS" for t in node.targets))
         for entry in ["README.md", "docs/faq.md"]:
             text = (ROOT / entry).read_text(encoding="utf-8")
-            for link in re.findall(r"\]\(([^)\s]+)\)", text):
+            links = re.findall(r"\]\(([^)\s]+)\)", text) + re.findall(r'<img\b[^>]*\bsrc="([^"]+)"', text)
+            for link in links:
                 if ":" in link or link.startswith("#"):
                     continue
                 target = posixpath.normpath(posixpath.join(posixpath.dirname(entry), link.split("#")[0]))

@@ -11,9 +11,9 @@
 >
 > **未开源的客户端，请谨慎使用；宣称开源，也要警惕“假开源”。** 如果只公开界面或外围代码，却不公开核心采集逻辑，仍以“开源客户端”让用户相信采集行为可被核查，就属于这里所说的“假开源”。尤其需要核查凭证如何获取、保存、使用，以及是否上传云端。**有公开仓库，不等于核心逻辑已公开，更不等于下载的安装包与源码一致或使用安全。**
 
-[项目官网](https://areyoubugcoder.github.io/mpider/) · [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/8c23uHExcT6) · [进群交流](https://qm.qq.com/q/s4JavFxA3e)
+[项目官网](https://areyoubugcoder.github.io/mpider/) · [下载客户端](https://github.com/areyoubugcoder/mpider/releases/latest) · [全部版本](https://github.com/areyoubugcoder/mpider/releases) · [使用说明](docs/windows-standalone.md) · [常见问题](docs/faq.md) · [反馈问题](https://github.com/areyoubugcoder/mpider/issues/new/choose) · [演示视频](https://xhslink.cn/o/8c23uHExcT6) · [进群交流](https://qm.qq.com/q/s4JavFxA3e) · [请作者喝杯☕~](#support)
 
-> **v2.0.1 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
+> **v3.0.0 · Windows x64 正式开源版**。当前仅验证微信 **4.1.15.56 x64** 的模块与函数指纹；微信升级后需要重新适配。macOS、Linux 不支持本次原生采集。
 
 ## 什么是账号池？有什么风险？
 
@@ -82,7 +82,9 @@ flowchart TD
 | 更新会话后续采 | 按提示手动打开目标主页，完整新会话到齐后继续原任务 |
 | 正文与图片下载 | 单篇、勾选或整号加入统一持久化队列，跳过已有正文 |
 | 离线阅读与导出 | 同时生成 Markdown、保留正文排版的 HTML、可搜索目录、共享图片和 CSV 清单 |
-| 请求与任务管理 | 分别配置列表、正文和图片的间隔、并发与预算，查看请求记录和系统日志 |
+| 互动数据与评论 | 单篇、批量或整号获取阅读、点赞、在看、分享及公开留言与回复，支持刷新已有数据 |
+| 文章筛选与恢复 | 筛选并恢复已删除文章，跨页多选后批量采集、下载或删除 |
+| 请求与任务管理 | 任务支持暂停、继续和取消；分别配置列表、正文、图片及互动评论的请求频次 |
 | 客户端更新 | Windows 安装版检查 GitHub 正式版本，预下载并验签，确认后安装与重启 |
 
 文章库默认隐藏已删除文章，可通过下拉筛选包含已删除记录并单独恢复；长文本最多显示两行。公众号列表的“更多”菜单支持整号采集互动或评论，批量任务默认跳过已完成数据，也可选择刷新；文章多选后可单独获取、下载和删除，单篇低频操作位于“更多”菜单。评论弹窗显示分页进度；刷新时比对已有留言，复用完整回复并补齐变化，仍需核对留言列表以发现旧留言的新回复。评论链接在默认浏览器打开。列表默认每页 10 条，可切换 20 / 50 / 100 条。底栏显示监测状态与活动任务进度，点击进度进入对应任务标签。游标实验室默认隐藏，可在系统设置中开启。
@@ -97,9 +99,9 @@ flowchart TD
 
 | 下载文件 | 用途 |
 | --- | --- |
-| `MPider_2.0.1_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
-| `MPider_2.0.1_x64_zh-CN.msi` | 中文 MSI 安装版 |
-| `MPider-v2.0.1-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
+| `MPider_3.0.0_x64-setup.exe` | 推荐，NSIS 安装版，支持应用内更新 |
+| `MPider_3.0.0_x64_zh-CN.msi` | 中文 MSI 安装版 |
+| `MPider-v3.0.0-windows-x64.zip` | 便携版，完整解压后运行 `MPider.exe`，保留旁边的 `runtime/` |
 | `SHA256SUMS` | 核对下载文件的 SHA-256 |
 
 三个客户端包均携带 Python **3.12.10**、Frida **17.23.3**、cryptography **50.0.2** 及所需许可，无需另外安装 Python、Node.js、pnpm 或 Rust。微信和 WebView2 需要自行安装。不要只复制便携包内的 EXE。
@@ -107,8 +109,16 @@ flowchart TD
 安装包附带应用更新签名，用于 MPider 验证更新文件；它不等同于 Windows 开发者代码签名，系统仍可能提示发布者未知。可先核对附件摘要：
 
 ```powershell
-Get-FileHash .\MPider_2.0.1_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\MPider_3.0.0_x64-setup.exe -Algorithm SHA256
 ```
+
+<a id="support"></a>
+
+## 请作者喝杯☕~
+
+如果 MPider 对你有帮助，欢迎请作者喝杯☕~
+
+<img src="docs/assets/wechat-donation.png" alt="微信赞赏码" width="240" />
 
 ## 开始采集
 
@@ -172,12 +182,6 @@ Tauri / React 提供界面，Rust 管理 SQLite、调度、请求策略和本地
 - [ ] **采集稳定性**：改进会话恢复、异常分类与长时间运行验证，持续适配新版微信。
 - [ ] **任务体验**：优化批量操作、进度展示、失败重试与诊断信息。
 - [ ] **数据管理**：完善备份恢复、归档迁移和本地存储清理。
-
-## 请作者喝杯☕~
-
-如果 MPider 对你有帮助，欢迎请作者喝杯☕~
-
-<img src="docs/assets/wechat-donation.png" alt="微信赞赏码" width="240" />
 
 ## 开发与贡献
 

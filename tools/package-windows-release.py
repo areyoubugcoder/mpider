@@ -28,6 +28,7 @@ PUBLIC_DOCUMENTS = (
     "docs/app-updates.md",
     "docs/system-logs.md",
     "docs/wechat-session-protocol.md",
+    "docs/assets/wechat-donation.png",
     "docs/screenshots/workbench-sources.png",
     "docs/screenshots/workbench-articles.png",
     "docs/screenshots/workbench-tasks.png",
